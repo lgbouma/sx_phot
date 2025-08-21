@@ -81,7 +81,9 @@ parser.add_argument('--star-threshold-sigma', type=float, default=5.0, help='Det
 parser.add_argument('--max-images', type=int, default=200, help='Maximum number of images to process from query results.')
 args = parser.parse_args()
 
-ra_deg, dec_deg = 0.8568686344700, -46.830975607410
+ra_deg, dec_deg = 0.8568686344700, -46.830975607410 # A star calib
+ra_deg, dec_deg = 114.36670927895, -66.75737858669 # TIC 3006
+
 MAX_N_IMAGES = args.max_images
 
 # CSV cache of processed photometry records
@@ -368,7 +370,7 @@ if records:
     ])
 
     plt.figure(figsize=(8, 5))
-    plt.errorbar(lam[~masked], flux[~masked], yerr=err[~masked], fmt='o', capsize=3)
+    plt.errorbar(lam[~masked], flux[~masked], yerr=err[~masked], fmt='.', capsize=3)
     plt.errorbar(lam[masked], flux[masked], fmt='x', color = 'r', capsize=3)
     plt.yscale('log')
     plt.xlabel("Wavelength (µm)")
