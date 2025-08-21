@@ -151,7 +151,9 @@ if records is None:
         # Rather, it returns a file that lists all data products and services
         # associated with this image.  For the quick release products, this
         # includes a spectral image MEF and a cutout service.
+        log(f"Starting DatalinkResults.from_result_url...")
         datalink_content = DatalinkResults.from_result_url(datalink_url)
+        log(f"Completed DatalinkResults.from_result_url...")
 
         # Use the primary spectral image MEF product.
         # This url will look like
@@ -394,7 +396,7 @@ if records:
     plt.title(f"SPHEREx Spectrum at RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
     plt.grid(True, which='both', linestyle='--', alpha=0.5)
     plt.tight_layout()
-    #plt.ylim([2e-3, 2e-1])
+    #plt.ylim([2e-2, 6e-1])
     savpath = f'result_{radecstr}{_a}.png'
     plt.savefig(savpath, dpi=300)
     log(f"Saved {savpath}")
