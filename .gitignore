@@ -26,3 +26,5 @@ art/*
 drivers/*csv
 run_iterative_pbls_kplr*dag
 *.swp
+*deprecated*
+*png
