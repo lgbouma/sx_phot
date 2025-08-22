@@ -11,6 +11,9 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any
 
+from glob import glob
+from os.path import join
+
 import requests
 
 from sx_phot.circphot import get_sx_spectrum
@@ -75,7 +78,7 @@ def main() -> None:
     min_pc = 30.
     max_pc = 60.
 
-    output_dir = Path("known_planets_{min_pc}-{max_pc}pc")
+    output_dir = Path(f"known_planets_{min_pc}-{max_pc}pc")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Fetch nearby known planet hosts
@@ -86,16 +89,16 @@ def main() -> None:
         host = sanitize_star_id(r["hostname"]) if r.get("hostname") else None
         print(f"[{i}/{len(rows)}] {r['hostname']} @ {r['ra']:.5f}, {r['dec']:.5f} (d={r['sy_dist']:.1f} pc)")
         try:
-            get_sx_spectrum(
-                ra_deg=r["ra"],
-                dec_deg=r["dec"],
-                star_id=host,
-                output_dir=str(output_dir),
-                # You can tweak these if desired:
-                # use_cutout=True,
-                # max_images=200,
-                # do_photometry=False,
-            )
+            existingpaths = glob(join(output_dir, f'*{host}*csv'))
+            if len(existingpaths) == 0:
+                get_sx_spectrum(
+                    ra_deg=r["ra"],
+                    dec_deg=r["dec"],
+                    star_id=host,
+                    output_dir=str(output_dir)
+                )
+            else:
+                print(f'Found {existingpaths}; skipping.')
         except Exception as e:
             print(f"  Skipped {r['hostname']}: {e}")
 
