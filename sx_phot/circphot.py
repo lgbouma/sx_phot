@@ -302,97 +302,105 @@ def get_sx_spectrum(
     if do_phot:
         records = []
         for ix, fpath in enumerate(file_paths):
-            log(f"{ix}/{len(file_paths)} Doing photometry...")
-            with fits.open(fpath, memmap=False) as hdul:
-                wcs = WCS(hdul['IMAGE'].header)
-                x, y = wcs.world_to_pixel(skycoord)
 
-                if not (0 <= x < 2040 and 0 <= y < 2040):
-                    continue
+            try:
 
-                # --- Aperture photometry ---
-                aperture = CircularAperture([(x, y)], r=APERTURE_RADIUS)
-                flux_img = hdul['IMAGE'].data
+                log(f"{ix}/{len(file_paths)} Doing photometry...")
+                with fits.open(fpath, memmap=False) as hdul:
+                    wcs = WCS(hdul['IMAGE'].header)
+                    x, y = wcs.world_to_pixel(skycoord)
 
-                # Defaults if extensions are missing
-                extnames = {h.name.upper() for h in hdul}
-                var_img = hdul['VARIANCE'].data if 'VARIANCE' in extnames else np.full_like(flux_img, np.nan)
-                flags_img = hdul['FLAGS'].data if 'FLAGS' in extnames else np.zeros_like(flux_img, dtype=np.uint32)
-                zodi_img = hdul['ZODI'].data if 'ZODI' in extnames else np.zeros_like(flux_img)
+                    if not (0 <= x < 2040 and 0 <= y < 2040):
+                        continue
 
-                # Background subtraction
-                if bkgd_method == 'zodi':
-                    img_for_phot = flux_img - zodi_img
-                    bkgd_level = None
-                else:
-                    annulus = CircularAnnulus([(x, y)], r_in=annulus_r_in, r_out=annulus_r_out)
-                    ann_mask_img = annulus.to_mask(method='center')[0].to_image(shape=flux_img.shape).astype(bool)
-                    star_mask = detect_stars_mask(flux_img, fwhm_pix=star_fwhm, threshold_sigma=star_threshold_sigma)
-                    valid = ann_mask_img & (~star_mask) & np.isfinite(flux_img)
-                    if np.any(valid):
-                        _, bkg_med, _ = sigma_clipped_stats(flux_img[valid], sigma=3.0, maxiters=5)
-                        bkgd_level = float(bkg_med)
+                    # --- Aperture photometry ---
+                    aperture = CircularAperture([(x, y)], r=APERTURE_RADIUS)
+                    flux_img = hdul['IMAGE'].data
+
+                    # Defaults if extensions are missing
+                    extnames = {h.name.upper() for h in hdul}
+                    var_img = hdul['VARIANCE'].data if 'VARIANCE' in extnames else np.full_like(flux_img, np.nan)
+                    flags_img = hdul['FLAGS'].data if 'FLAGS' in extnames else np.zeros_like(flux_img, dtype=np.uint32)
+                    zodi_img = hdul['ZODI'].data if 'ZODI' in extnames else np.zeros_like(flux_img)
+
+                    # Background subtraction
+                    if bkgd_method == 'zodi':
+                        img_for_phot = flux_img - zodi_img
+                        bkgd_level = None
                     else:
-                        bkgd_level = 0.0
-                    img_for_phot = flux_img  # subtract constant after aperture sum
+                        annulus = CircularAnnulus([(x, y)], r_in=annulus_r_in, r_out=annulus_r_out)
+                        ann_mask_img = annulus.to_mask(method='center')[0].to_image(shape=flux_img.shape).astype(bool)
+                        star_mask = detect_stars_mask(flux_img, fwhm_pix=star_fwhm, threshold_sigma=star_threshold_sigma)
+                        valid = ann_mask_img & (~star_mask) & np.isfinite(flux_img)
+                        if np.any(valid):
+                            _, bkg_med, _ = sigma_clipped_stats(flux_img[valid], sigma=3.0, maxiters=5)
+                            bkgd_level = float(bkg_med)
+                        else:
+                            bkgd_level = 0.0
+                        img_for_phot = flux_img  # subtract constant after aperture sum
 
-                # Perform photometry
-                flux_tbl = aperture_photometry(img_for_phot, aperture)
-                var_tbl = aperture_photometry(var_img, aperture)
+                    # Perform photometry
+                    flux_tbl = aperture_photometry(img_for_phot, aperture)
+                    var_tbl = aperture_photometry(var_img, aperture)
 
-                # Sum in aperture
-                flux_ap = flux_tbl['aperture_sum'][0]  # MJy/sr
-                flux_err = np.sqrt(var_tbl['aperture_sum'][0])  # MJy/sr
+                    # Sum in aperture
+                    flux_ap = flux_tbl['aperture_sum'][0]  # MJy/sr
+                    flux_err = np.sqrt(var_tbl['aperture_sum'][0])  # MJy/sr
 
-                # If variance missing, Poisson fallback
-                if not np.isfinite(flux_err):
-                    pos_flux_img = np.clip(flux_img, a_min=0, a_max=None)
-                    pos_tbl = aperture_photometry(pos_flux_img, aperture)
-                    flux_err = np.sqrt(pos_tbl['aperture_sum'][0])
+                    # If variance missing, Poisson fallback
+                    if not np.isfinite(flux_err):
+                        pos_flux_img = np.clip(flux_img, a_min=0, a_max=None)
+                        pos_tbl = aperture_photometry(pos_flux_img, aperture)
+                        flux_err = np.sqrt(pos_tbl['aperture_sum'][0])
 
-                # Subtract local background contribution if used
-                if bkgd_method == 'annulus' and bkgd_level is not None:
-                    ap_area_pix = np.pi * (APERTURE_RADIUS ** 2)
-                    flux_ap = flux_ap - bkgd_level * ap_area_pix
-                flux_val = flux_ap
+                    # Subtract local background contribution if used
+                    if bkgd_method == 'annulus' and bkgd_level is not None:
+                        ap_area_pix = np.pi * (APERTURE_RADIUS ** 2)
+                        flux_ap = flux_ap - bkgd_level * ap_area_pix
+                    flux_val = flux_ap
 
-                # Evaluate mask across full image shape
-                mask = aperture.to_mask(method="center")[0]
-                aper_mask = mask.to_image(shape=flags_img.shape)
-                aper_flags = flags_img[aper_mask.astype(bool)]
-                is_flagged = np.any(aper_flags & BITMASK)
+                    # Evaluate mask across full image shape
+                    mask = aperture.to_mask(method="center")[0]
+                    aper_mask = mask.to_image(shape=flags_img.shape)
+                    aper_flags = flags_img[aper_mask.astype(bool)]
+                    is_flagged = np.any(aper_flags & BITMASK)
 
-                # Wavelength solution
-                wave_wcs = WCS(hdul[1].header, hdul, key='W')
-                wave_wcs.sip = None
-                lam, dlam = wave_wcs.wcs_pix2world(x, y, 0)
+                    # Wavelength solution
+                    wave_wcs = WCS(hdul[1].header, hdul, key='W')
+                    wave_wcs.sip = None
+                    lam, dlam = wave_wcs.wcs_pix2world(x, y, 0)
 
-                # Observation time (MJD-AVG)
-                mjd_avg = hdul['IMAGE'].header.get('MJD-AVG', np.nan)
+                    # Observation time (MJD-AVG)
+                    mjd_avg = hdul['IMAGE'].header.get('MJD-AVG', np.nan)
 
-                # Convert MJy/sr to Jy using aperture area
-                pix_area_sr = (ARCSEC_PER_PIXEL / 3600 * np.pi / 180) ** 2
-                flux_jy = flux_val * pix_area_sr * 1e6
-                flux_err_jy = flux_err * pix_area_sr * 1e6
+                    # Convert MJy/sr to Jy using aperture area
+                    pix_area_sr = (ARCSEC_PER_PIXEL / 3600 * np.pi / 180) ** 2
+                    flux_jy = flux_val * pix_area_sr * 1e6
+                    flux_err_jy = flux_err * pix_area_sr * 1e6
 
-                records.append({
-                    "wavelength_um": lam,
-                    "bandwidth_um": dlam,
-                    "flux_jy": flux_jy,
-                    "flux_err_jy": flux_err_jy,
-                    "file": fpath,
-                    "masked": is_flagged,
-                    "mjd_avg": mjd_avg,
-                    "bkgd_method": bkgd_method,
-                    "aperture_radius_pix": APERTURE_RADIUS,
-                    "annulus_r_in_pix": annulus_r_in if bkgd_method == 'annulus' else np.nan,
-                    "annulus_r_out_pix": annulus_r_out if bkgd_method == 'annulus' else np.nan,
-                })
+                    records.append({
+                        "wavelength_um": lam,
+                        "bandwidth_um": dlam,
+                        "flux_jy": flux_jy,
+                        "flux_err_jy": flux_err_jy,
+                        "file": fpath,
+                        "masked": is_flagged,
+                        "mjd_avg": mjd_avg,
+                        "bkgd_method": bkgd_method,
+                        "aperture_radius_pix": APERTURE_RADIUS,
+                        "annulus_r_in_pix": annulus_r_in if bkgd_method == 'annulus' else np.nan,
+                        "annulus_r_out_pix": annulus_r_out if bkgd_method == 'annulus' else np.nan,
+                    })
 
-                log(f"{fpath}")
-                log(
-                    f"Pixel: ({x:.1f}, {y:.1f}), λ = {lam:.4f} µm ± {dlam:.4f}, Flux = {flux_jy:.3e} Jy"
-                )
+                    log(f"{fpath}")
+                    log(
+                        f"Pixel: ({x:.1f}, {y:.1f}), λ = {lam:.4f} µm ± {dlam:.4f}, Flux = {flux_jy:.3e} Jy"
+                    )
+
+            except Exception as e:
+                print(f" {star_id} {ix} {fpath} failed with {e}.  skipping this image.")
+                pass
+
 
     # Plot + CSV
     if records:
