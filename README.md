@@ -8,3 +8,4 @@ Minimal SPHEREx circular-aperture photometry utilities and driver.
 
 ## Thank you
 Zafar Rustamkulov and Kishalay De for offering the starting point.
+SPHEREx team for creating a wonderful instrument and data product.
