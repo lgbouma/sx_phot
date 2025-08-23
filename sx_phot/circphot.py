@@ -32,6 +32,7 @@ from astropy.wcs import FITSFixedWarning
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 
 import os
+os.environ["MPLBACKEND"] = "Agg"
 import re
 from astropy.io import fits
 import matplotlib.pyplot as plt
@@ -415,6 +416,7 @@ def get_sx_spectrum(
         ])
 
         if save_plot:
+            plt.close('all')
             plt.figure(figsize=(8, 5))
             plt.errorbar(lam[~masked], flux[~masked], yerr=err[~masked], fmt='.', capsize=3)
             plt.errorbar(lam[masked], flux[masked], fmt='x', color='r', capsize=3)
@@ -427,6 +429,7 @@ def get_sx_spectrum(
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
             plt.savefig(str(savpath), dpi=300)
             log(f"Saved {savpath}")
+            plt.close('all')
 
         if save_csv:
             try:
