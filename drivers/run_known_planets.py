@@ -11,6 +11,9 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any
 
+from glob import glob
+from os.path import join
+
 import requests
 
 from sx_phot.circphot import get_sx_spectrum
@@ -30,7 +33,12 @@ def sanitize_star_id(name: str) -> str:
     return s or "unknown"
 
 
-def query_known_planets_within_distance(max_pc: float = 50.0, limit: int | None = None) -> List[Dict[str, Any]]:
+def query_known_planets_within_distance(
+    min_pc: float = 30.0,
+    max_pc: float = 60.0,
+    limit: int | None = None
+    ) -> List[Dict[str, Any]]:
+
     """Query pscomppars for host RA, Dec, name, and system distance.
 
     Returns a list of rows (dicts) with keys: hostname, ra, dec, sy_dist.
@@ -39,6 +47,7 @@ def query_known_planets_within_distance(max_pc: float = 50.0, limit: int | None 
         "SELECT DISTINCT hostname, ra, dec, sy_dist "
         "FROM pscomppars "
         f"WHERE sy_dist < {float(max_pc)} "
+        f"AND sy_dist > {float(min_pc)} "
         "AND ra IS NOT NULL AND dec IS NOT NULL AND sy_dist IS NOT NULL "
         "ORDER BY sy_dist ASC"
     )
@@ -66,31 +75,33 @@ def query_known_planets_within_distance(max_pc: float = 50.0, limit: int | None 
 
 
 def main() -> None:
-    output_dir = Path("known_planets_50pc")
+    min_pc = 30.
+    max_pc = 60.
+
+    output_dir = Path(f"known_planets_{min_pc}-{max_pc}pc")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Fetch nearby known planet hosts
-    rows = query_known_planets_within_distance(max_pc=50.0, limit=None)
-    print(f"Found {len(rows)} hosts within 50 pc. Running photometry...")
+    rows = query_known_planets_within_distance(min_pc=min_pc, max_pc=max_pc, limit=None)
+    print(f"Found {len(rows)} hosts from {min_pc}-{max_pc} pc. Running photometry...")
 
     for i, r in enumerate(rows, start=1):
         host = sanitize_star_id(r["hostname"]) if r.get("hostname") else None
         print(f"[{i}/{len(rows)}] {r['hostname']} @ {r['ra']:.5f}, {r['dec']:.5f} (d={r['sy_dist']:.1f} pc)")
         try:
-            get_sx_spectrum(
-                ra_deg=r["ra"],
-                dec_deg=r["dec"],
-                star_id=host,
-                output_dir=str(output_dir),
-                # You can tweak these if desired:
-                # use_cutout=True,
-                # max_images=200,
-                # do_photometry=False,
-            )
+            existingpaths = glob(join(output_dir, f'*{host}*csv'))
+            if len(existingpaths) == 0:
+                get_sx_spectrum(
+                    ra_deg=r["ra"],
+                    dec_deg=r["dec"],
+                    star_id=host,
+                    output_dir=str(output_dir)
+                )
+            else:
+                print(f'Found {existingpaths}; skipping.')
         except Exception as e:
             print(f"  Skipped {r['hostname']}: {e}")
 
 
 if __name__ == "__main__":
     main()
-
