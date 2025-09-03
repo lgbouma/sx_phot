@@ -474,7 +474,7 @@ def get_sx_spectrum(
             ax2.set_yscale('log')
             ax2.set_xlabel("Wavelength (µm)")
             ax2.set_ylabel("Flux (Jy)")
-            ax2.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
+            ax2.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.2f}, Dec={dec_deg:.2f}")
             ax2.grid(True, which='both', linestyle='--', alpha=0.5)
 
             # Add a small horizontal colorbar at lower-left of the plot
