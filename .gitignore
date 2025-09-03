@@ -29,3 +29,5 @@ run_iterative_pbls_kplr*dag
 *deprecated*
 *png
 drivers/known_planets_30.0-60.0pc/
+scripts/LOGS/
+drivers/test_results/
