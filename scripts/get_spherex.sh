@@ -57,6 +57,7 @@ fi
 
 : > "$MANIFEST_F"
 echo "3) Comparing to local files and building manifest at $MANIFEST_F ..."
+count=0
 while IFS=$'\t' read -r size key; do
   # compute relative path after PREFIX
   rel="${key#${PREFIX}}"
@@ -80,6 +81,12 @@ while IFS=$'\t' read -r size key; do
     printf 'cp s3://%s/%s %s\n' "$BUCKET" "$key" "$localpath" \
       >> "$MANIFEST_F"
   fi
+  # progress log every 1000 lines
+  count=$((count + 1))
+  if (( count % 1000 == 0 )); then
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] ... compared $count lines"
+  fi
 done < "$SIZES_KEYS_F"
 
 nlines=$(wc -l < "$MANIFEST_F" || echo 0)
@@ -95,4 +102,3 @@ echo "4) Running s5cmd manifest with $NUMWORKERS workers ..."
 "$S5CMD" --no-sign-request --numworkers "$NUMWORKERS" run "$MANIFEST_F"
 
 echo "Done."
-
