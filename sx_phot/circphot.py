@@ -409,6 +409,7 @@ def get_sx_spectrum(
         lam = np.array([r["wavelength_um"] for r in records])
         flux = np.array([r["flux_jy"] for r in records])
         err = np.array([r["flux_err_jy"] for r in records])
+        mjds = np.array([r["mjd_avg"] for r in records])
         masked_vals = [r.get("masked", False) for r in records]
         masked = np.array([
             bool(v) if isinstance(v, (bool, np.bool_)) else str(v).lower() in {"1", "true", "t", "yes"}
@@ -416,18 +417,24 @@ def get_sx_spectrum(
         ])
 
         if save_plot:
+
+            from aesthetic.plot import set_style, savefig
+            set_style('science')
+
+            # Figure 1: just the spectrum
             plt.close('all')
-            plt.figure(figsize=(8, 5))
-            plt.errorbar(lam[~masked], flux[~masked], yerr=err[~masked], fmt='.', capsize=3)
-            plt.errorbar(lam[masked], flux[masked], fmt='x', color='r', capsize=3)
-            plt.yscale('log')
-            plt.xlabel("Wavelength (µm)")
-            plt.ylabel("Flux (Jy)")
-            plt.title(f"SPHEREx Spectrum at RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
-            plt.grid(True, which='both', linestyle='--', alpha=0.5)
-            plt.tight_layout()
+            fig, ax = plt.subplots(figsize=(5,5))
+            ax.errorbar(lam[~masked], flux[~masked], yerr=err[~masked],
+                        fmt='.', capsize=3, c='k')
+            ax.errorbar(lam[masked], flux[masked], fmt='x', color='r', capsize=3)
+            ax.set_yscale('log')
+            ax.set_xlabel("Wavelength (µm)")
+            ax.set_ylabel("Flux (Jy)")
+            ax.set_title(f"{staridstr} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
+            ax.grid(True, which='both', linestyle='--', alpha=0.5)
+            fig.tight_layout()
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
-            plt.savefig(str(savpath), dpi=300)
+            savefig(fig, str(savpath), writepdf=0)
             log(f"Saved {savpath}")
             plt.close('all')
 
