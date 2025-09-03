@@ -36,6 +36,7 @@ os.environ["MPLBACKEND"] = "Agg"
 import re
 from astropy.io import fits
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 import numpy as np
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -134,6 +135,8 @@ def get_sx_spectrum(
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     cache_csv = outdir / f"sxphot_cache_{staridstr}{radecstr}{_a}.csv"
+
+    log(f"Starting get_sx_spectrum for {staridstr} {radecstr} {_a}")
 
     skycoord = SkyCoord(ra=ra_deg, dec=dec_deg, unit='degree', frame='icrs')
 
@@ -244,7 +247,7 @@ def get_sx_spectrum(
                 subdir = cache_root / radecstr
                 download_url = irsa_cutout_image_url
             else:
-                cache_root = Path.home() / "local" / "SPHEREX" / "level2"
+                cache_root = Path.home() / "local" / "SPHEREX" / "spherex_l2"
 
                 def parse_subdir_from_fname(fname: str, root: Path):
                     stem = Path(fname).stem
@@ -410,6 +413,7 @@ def get_sx_spectrum(
         flux = np.array([r["flux_jy"] for r in records])
         err = np.array([r["flux_err_jy"] for r in records])
         mjds = np.array([r["mjd_avg"] for r in records])
+        mjds -= np.nanmin(mjds)
         masked_vals = [r.get("masked", False) for r in records]
         masked = np.array([
             bool(v) if isinstance(v, (bool, np.bool_)) else str(v).lower() in {"1", "true", "t", "yes"}
@@ -430,12 +434,69 @@ def get_sx_spectrum(
             ax.set_yscale('log')
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Flux (Jy)")
-            ax.set_title(f"{staridstr} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
+            ax.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
             ax.grid(True, which='both', linestyle='--', alpha=0.5)
             fig.tight_layout()
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
             savefig(fig, str(savpath), writepdf=0)
             log(f"Saved {savpath}")
+            plt.close('all')
+
+            # Figure 2: spectrum colored by MJD with a small colorbar
+            plt.close('all')
+            fig2, ax2 = plt.subplots(figsize=(5,5))
+
+            # Establish color normalization on available MJD values
+            finite_mjd = np.isfinite(mjds)
+            if np.any(finite_mjd):
+                vmin = float(np.nanmin(mjds[finite_mjd]))
+                vmax = float(np.nanmax(mjds[finite_mjd]))
+                norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+                cmap = plt.cm.viridis
+
+                # Error bars in light gray beneath the colored points
+                ax2.errorbar(lam[~masked], flux[~masked], yerr=err[~masked],
+                             fmt='none', ecolor='0.6', elinewidth=1, capsize=2,
+                             alpha=0.7, zorder=-1)
+
+                sc = ax2.scatter(lam[~masked], flux[~masked], c=mjds[~masked],
+                                 cmap=cmap, norm=norm, s=20, edgecolors='none')
+            else:
+                # Fallback if MJD is missing; plot in gray
+                sc = ax2.scatter(lam[~masked], flux[~masked], color='0.5',
+                                 s=20, edgecolors='none')
+
+            # Mark masked points similarly to Figure 1
+            if np.any(masked):
+                ax2.errorbar(lam[masked], flux[masked], fmt='x', color='r',
+                             capsize=3)
+
+            ax2.set_yscale('log')
+            ax2.set_xlabel("Wavelength (µm)")
+            ax2.set_ylabel("Flux (Jy)")
+            ax2.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
+            ax2.grid(True, which='both', linestyle='--', alpha=0.5)
+
+            # Add a small horizontal colorbar at lower-left of the plot
+            try:
+                if np.any(finite_mjd):
+                    # Place colorbar within the axes area, lower-left, ~25% axis width
+                    axpos = ax2.get_position()
+                    cb_width = 0.25 * axpos.width
+                    cb_height = 0.03 * axpos.height
+                    cb_left = axpos.x0 + 0.07 * axpos.width
+                    cb_bottom = axpos.y0 + 0.12 * axpos.height
+                    cax = fig2.add_axes([cb_left, cb_bottom, cb_width, cb_height])
+                    cb = fig2.colorbar(sc, cax=cax, orientation='horizontal')
+                    cb.set_label('Days from start')
+            except Exception:
+                # If anything goes wrong with manual placement, skip the colorbar
+                pass
+
+            fig2.tight_layout()
+            savpath2 = outdir / f"{staridstr}{radecstr}{_a}_mjdc.png"
+            savefig(fig2, str(savpath2), writepdf=0)
+            log(f"Saved {savpath2}")
             plt.close('all')
 
         if save_csv:
