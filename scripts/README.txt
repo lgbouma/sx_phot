@@ -29,11 +29,11 @@ get_spherex.sh:  Use s5cmd to pull all LVF images from AWS.  These are the
 
   Setup Cron (run once per day)
   1) Make sure the wrapper is executable:
-     `chmod +x /Users/luke/Dropbox/proj/sx_phot/scripts/run_get_spherex_daily.sh`
+     `chmod +x /PATH/TO/sx_phot/scripts/run_get_spherex_daily.sh`
   2) Add a crontab entry (examples run at 03:00 local time):
      `crontab -e`
      Then add:
-     `0 3 * * * /bin/bash /Users/luke/Dropbox/proj/sx_phot/scripts/run_get_spherex_daily.sh`
+     `0 3 * * * /bin/bash /PATH/TO/sx_phot/scripts/run_get_spherex_daily.sh`
 
   Notes
   - PATH: The wrapper exports a PATH that includes common locations for `aws` and `s5cmd` so cron can find them.
