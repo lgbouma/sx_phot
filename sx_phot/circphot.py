@@ -37,6 +37,9 @@ import re
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.patches import Circle
+import matplotlib.patheffects as pe
 import numpy as np
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -105,6 +108,7 @@ def get_sx_spectrum(
     max_workers: int = 40,
     size_pix: int = 64,
     save_plot: bool = True,
+    show_cutout: bool = True,
     save_csv: bool = True,
     output_dir: Union[str, Path] = ".",
     star_id: Optional[str] = None,
@@ -124,6 +128,7 @@ def get_sx_spectrum(
     - max_workers: threads to resolve datalink URLs in parallel.
     - size_pix: cutout size (square) in pixels when use_cutout=True.
     - save_plot, save_csv: whether to save result PNG and CSV cache.
+    - show_cutout: whether to include a cutout in the saved plots.
 
     Returns
     - pandas.DataFrame of per-image photometry records (may be empty).
@@ -217,6 +222,8 @@ def get_sx_spectrum(
 
     download_urls = get_download_urls_multithreaded(datalink_urls, max_workers_local=max_workers)
     irsa_spectral_image_urls = [u for u in download_urls if u]
+    # Map FITS basename -> IRSA spectral image URL for later cutout retrieval
+    basename_to_irsa_url = {Path(u).name: u for u in irsa_spectral_image_urls}
     log(
         f"Prepared {len(irsa_spectral_image_urls)} primary download URLs (e.g., AWS/Cutout derivable)."
     )
@@ -420,6 +427,113 @@ def get_sx_spectrum(
             for v in masked_vals
         ])
 
+        # Prepare a single cutout image (bluest/smallest wavelength) if requested
+        cutout_img = None
+        cutout_wav = None
+        cutout_wcs = None
+        if show_cutout:
+            try:
+                finite_lam = np.isfinite(lam)
+                if np.any(finite_lam):
+                    idx_min = int(np.nanargmin(lam[finite_lam]))
+                    # Map back to full index space
+                    idxs = np.where(finite_lam)[0]
+                    idx_min_full = int(idxs[idx_min])
+                    rec_min = records[idx_min_full]
+                    cutout_wav = float(rec_min.get("wavelength_um", np.nan))
+                    rec_file = rec_min.get("file", "")
+                    rec_fname = Path(str(rec_file)).name if rec_file else None
+
+                    # Try to use existing file if it exists and is readable
+                    candidate_path = Path(str(rec_file)) if rec_file else None
+                    use_existing = candidate_path is not None and candidate_path.exists()
+
+                    if use_existing and use_cutout:
+                        # Likely already a cutout; open directly
+                        with fits.open(candidate_path, memmap=False) as hdul:
+                            cutout_img = np.asarray(hdul['IMAGE'].data)
+                            cutout_wcs = WCS(hdul['IMAGE'].header)
+                    else:
+                        # Build an IRSA cutout URL for this specific spectral image
+                        base_url = basename_to_irsa_url.get(rec_fname, None)
+                        if base_url is None and use_existing:
+                            # Attempt to recover by matching by name among all URLs
+                            for fname, url in basename_to_irsa_url.items():
+                                if fname == rec_fname:
+                                    base_url = url
+                                    break
+                        if base_url is not None:
+                            irsa_cutout_url = (
+                                f"{base_url}?center={ra_deg},{dec_deg}deg&size={int(size_pix)}pix"
+                            )
+                            # Cache path for the cutout
+                            cache_root = Path.home() / "local" / "SPHEREX" / "cutouts"
+                            subdir = cache_root / f"{radecstr}"
+                            subdir.mkdir(parents=True, exist_ok=True)
+                            cutout_path = subdir / (rec_fname or "cutout.fits")
+                            if not cutout_path.exists():
+                                try:
+                                    log(f"Downloading display cutout to {cutout_path} ...")
+                                    urlretrieve(irsa_cutout_url, cutout_path)
+                                except Exception as e:
+                                    log(f"⚠️ Failed to download display cutout: {e}")
+                            if cutout_path.exists():
+                                with fits.open(cutout_path, memmap=False) as hdul:
+                                    cutout_img = np.asarray(hdul['IMAGE'].data)
+                                    cutout_wcs = WCS(hdul['IMAGE'].header)
+                        elif use_existing:
+                            # Fall back: read existing (full) image and show it
+                            try:
+                                with fits.open(candidate_path, memmap=False) as hdul:
+                                    cutout_img = np.asarray(hdul['IMAGE'].data)
+                                    cutout_wcs = WCS(hdul['IMAGE'].header)
+                            except Exception:
+                                pass
+            except Exception as e:
+                log(f"⚠️ Failed preparing cutout image: {e}")
+
+        def _add_cutout_inset(fig, host_ax, image, wavelength_um, wcs_for_image, ra_deg_pt, dec_deg_pt, ap_radius_pix):
+            if image is None:
+                return
+            try:
+                data = np.asarray(image)
+                finite = np.isfinite(data)
+                if not np.any(finite):
+                    return
+                # Robust display scaling for astronomy images
+                lo, hi = np.nanpercentile(data[finite], [5, 99.5])
+                if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+                    lo, hi = float(np.nanmin(data[finite])), float(np.nanmax(data[finite]))
+                norm = mcolors.Normalize(vmin=lo, vmax=hi)
+
+                # Inset occupying ~20% of the axis in the upper-right
+                ax_in = inset_axes(host_ax, width="20%", height="20%", loc='upper right', borderpad=0.6)
+                im = ax_in.imshow(data, origin='lower', cmap='magma', norm=norm, interpolation='nearest')
+                ax_in.set_xticks([])
+                ax_in.set_yticks([])
+
+                # Label with wavelength
+                if wavelength_um is not None and np.isfinite(wavelength_um):
+                    ax_in.text(0.03, 0.97, f"λ={wavelength_um:.2f}µm", ha='left', va='top',
+                               transform=ax_in.transAxes, color='w', fontsize=6,
+                               bbox=dict(facecolor='k', alpha=0.35, pad=1, edgecolor='none'))
+
+                # Overlay the circular aperture at the target position using the cutout WCS
+                try:
+                    if wcs_for_image is not None and np.isfinite(ap_radius_pix):
+                        sc = SkyCoord(ra=ra_deg_pt, dec=dec_deg_pt, unit='deg', frame='icrs')
+                        xpix, ypix = WCS(wcs_for_image.to_header()).world_to_pixel(sc)
+                        circ = Circle((xpix, ypix),
+                                      radius=float(ap_radius_pix), fill=False,
+                                      linewidth=0.2, edgecolor='gray')
+                        # Add a black stroke to ensure contrast
+                        #circ.set_path_effects([pe.withStroke(linewidth=0.2, foreground='black')])
+                        ax_in.add_patch(circ)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         if save_plot:
 
             from aesthetic.plot import set_style, savefig
@@ -434,8 +548,11 @@ def get_sx_spectrum(
             ax.set_yscale('log')
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Flux (Jy)")
-            ax.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
+            ax.set_title(f"{staridstr.replace('_',':')} α={ra_deg:.4f}, δ={dec_deg:.4f}")
             ax.grid(True, which='both', linestyle='--', alpha=0.5)
+            # Optionally overlay a cutout inset in the upper-right
+            if show_cutout:
+                _add_cutout_inset(fig, ax, cutout_img, cutout_wav, cutout_wcs, ra_deg, dec_deg, APERTURE_RADIUS)
             fig.tight_layout()
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
             savefig(fig, str(savpath), writepdf=0)
@@ -474,7 +591,7 @@ def get_sx_spectrum(
             ax2.set_yscale('log')
             ax2.set_xlabel("Wavelength (µm)")
             ax2.set_ylabel("Flux (Jy)")
-            ax2.set_title(f"{staridstr.replace('_',':')} RA={ra_deg:.2f}, Dec={dec_deg:.2f}")
+            ax2.set_title(f"{staridstr.replace('_',':')} α={ra_deg:.2f}, δ={dec_deg:.2f}")
             ax2.grid(True, which='both', linestyle='--', alpha=0.5)
 
             # Add a small horizontal colorbar at lower-left of the plot
@@ -493,6 +610,9 @@ def get_sx_spectrum(
                 # If anything goes wrong with manual placement, skip the colorbar
                 pass
 
+            # Optionally overlay the same cutout inset here too
+            if show_cutout:
+                _add_cutout_inset(fig2, ax2, cutout_img, cutout_wav, cutout_wcs, ra_deg, dec_deg, APERTURE_RADIUS)
             fig2.tight_layout()
             savpath2 = outdir / f"{staridstr}{radecstr}{_a}_mjdc.png"
             savefig(fig2, str(savpath2), writepdf=0)
