@@ -141,7 +141,7 @@ def get_sx_spectrum(
     outdir.mkdir(parents=True, exist_ok=True)
     cache_csv = outdir / f"sxphot_cache_{staridstr}{radecstr}{_a}.csv"
 
-    log(f"Starting get_sx_spectrum for {staridstr} {radecstr} {_a}")
+    log(f"Starting get_sx_spectrum for {star_id} {radecstr} {bkgd_method}")
 
     skycoord = SkyCoord(ra=ra_deg, dec=dec_deg, unit='degree', frame='icrs')
 
