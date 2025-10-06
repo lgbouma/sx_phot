@@ -63,6 +63,15 @@ from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photo
 from astropy.stats import sigma_clipped_stats
 
 # --- Bitmask for SPHEREx bad flags ---
+# Bit 0: TRANSIENT (e.g. cosmic ray) detected during SUR
+# Bit 1: OVERFLOW reached during SUR.  (threshold = half of full well).
+# Bit 2: SUR_ERROR chksum_error from instrument processing
+# Bit 6: NONFUNC pre-flight assessment that pixel is dead
+# Bit 7: DICHROIC pixels in dark corners of Bands 3 and 4
+# Bit 9: MISSING_DATA corrupted packages on downlink
+# Bit 10: HOT pixel, not usable for science
+# Bit 11: COLD pixel, unresponsive to light
+# Bit 15: NONLINEARity correction couldn't be determined
 BITMASK = (
     (1 << 0)  | (1 << 1)  | (1 << 2)  |
     (1 << 6)  | (1 << 7)  | (1 << 9)  |
