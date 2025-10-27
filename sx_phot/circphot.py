@@ -51,6 +51,7 @@ from urllib.error import URLError, HTTPError
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Union
+from collections import Counter
 
 
 def log(message: str) -> None:
@@ -384,6 +385,7 @@ def get_sx_spectrum(
                     aper_mask = mask.to_image(shape=flags_img.shape)
                     aper_flags = flags_img[aper_mask.astype(bool)]
                     is_flagged = np.any(aper_flags & BITMASK)
+                    aper_count = str(dict(Counter(aper_flags)))
 
                     # Wavelength solution
                     wave_wcs = WCS(hdul[1].header, hdul, key='W')
@@ -405,6 +407,7 @@ def get_sx_spectrum(
                         "flux_err_jy": flux_err_jy,
                         "file": fpath,
                         "masked": is_flagged,
+                        "aper_count": aper_count,
                         "mjd_avg": mjd_avg,
                         "bkgd_method": bkgd_method,
                         "aperture_radius_pix": APERTURE_RADIUS,
