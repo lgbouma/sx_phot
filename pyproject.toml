@@ -14,11 +14,10 @@ dependencies = [
   "matplotlib",
   "pyvo",
   "requests",
-  "aesthetic"
+  "astroquery",
+  "aesthetic",
+  "pytest"
 ]
-
-[project.optional-dependencies]
-dev = ["pytest", "pytest-mock"]
 
 [project.urls]
 homepage = "https://github.com/lgbouma/sx_phot"
