@@ -33,3 +33,5 @@ scripts/LOGS/
 drivers/test_results/
 notebooks
 drivers/*results
+drivers/known_planets_50pc/
+drivers/*.sh
