@@ -16,7 +16,7 @@ This guide exists for Codex agents working on the **SPHEREx spectrophotometry pi
 ## Deployment
 
 - At scale, this code is deployed on the open science grid.
-- During testing and development, this code is deployed on local laptops and servers.  IMPORTANT: during development, use the `vbls` conda environment for all Python development, tests, and automation runs.  For instance, use /Users/luke/local/miniconda3/envs/vbls/bin/python and miniconda3/envs/vbls/bin/pytest directly.
+- During testing and development, this code is deployed on local laptops and servers.  IMPORTANT: during development, use the `py311_sx` conda environment for all Python development, tests, and automation runs.  For instance, use /Users/luke/local/miniconda3/envs/py311_sx/bin/python and miniconda3/envs/py311_sx/bin/pytest directly.
 
 ## Workflow expectations
 
@@ -28,7 +28,7 @@ This guide exists for Codex agents working on the **SPHEREx spectrophotometry pi
 ## Testing and quality gates
 
 - Use `pytest` for automated testing; add or update tests whenever behavior changes.
-- Before committing, run the relevant subset of `pytest` locally inside the `vbls` environment and fix regressions.
+- Before committing, run the relevant subset of `pytest` locally inside the `py311_sx` environment and fix regressions.
 - Expect GitHub Actions to run after pushes; keep the main branch green by ensuring local tests mirror CI targets.
 
 ## Additional guidance
