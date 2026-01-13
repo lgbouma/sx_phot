@@ -6,25 +6,28 @@ This module exposes a callable API:
     get_sx_spectrum(ra_deg, dec_deg, **kwargs) -> pandas.DataFrame
 
 Summary
-- Queries the IRSA TAP service for SPHEREx observations overlapping a target
-  (ra_deg, dec_deg).
-- Downloads the primary spectral image MEF FITS (via the public S3 mirror),
-  or an IRSA cutout (default), caches them on disk, and performs aperture
-  photometry at the target pixel.
+- Queries the IRSA TAP service for SPHEREx observations overlapping a
+  target (ra_deg, dec_deg).
+- Downloads the primary spectral image MEF FITS (via the public S3
+  mirror), or an IRSA cutout (default), caches them on disk, and
+  performs aperture photometry at the target pixel.
 - Saves a spectrum plot PNG and a CSV cache of per-image photometry.
 
 Background methods
-- bkgd_method = 'zodi': subtract the provided ZODI background image (default).
-- bkgd_method = 'annulus': estimate a local background as the sigma‑clipped
-  median within a circular annulus [annulus_r_in, annulus_r_out] in pixels,
-  masking stars in the annulus via sigclip.
+- bkgd_method = 'zodi': subtract the provided ZODI background image
+  (default).
+- bkgd_method = 'annulus': estimate a local background as the
+  sigma‑clipped median within a circular annulus
+  [annulus_r_in, annulus_r_out] in pixels, masking stars in the
+  annulus via sigclip.
 
 Outputs
 - result_<radec>.png in the current directory.
 - sxphot_cache_<radec>.csv in the current directory.
 
 Notes
-- Aperture area is converted from MJy/sr to Jy using the pixel solid angle.
+- Aperture area is converted from MJy/sr to Jy using the pixel solid
+  angle.
 """
 
 import warnings
@@ -55,13 +58,24 @@ from collections import Counter
 
 
 def log(message: str) -> None:
+    """Log a timestamped message.
+
+    Args:
+        message: Message to print.
+    """
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{ts}] {message}")
 
 
-from astropy import units as u  # noqa: F401 (imported for completeness; not used directly)
-from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photometry
+from astropy import units as u  # noqa: F401
+from photutils.aperture import (
+    CircularAperture,
+    CircularAnnulus,
+    aperture_photometry,
+)
 from astropy.stats import sigma_clipped_stats
+
+# Imported for completeness; not used directly.
 
 # --- Bitmask for SPHEREx bad flags ---
 # Bit 0: TRANSIENT (e.g. cosmic ray) detected during SUR
@@ -83,12 +97,23 @@ ARCSEC_PER_PIXEL = 6.1
 
 TJD_OFFSET = 56999.5
 
-def detect_stars_mask(image, fwhm_pix, threshold_sigma):
-    """Return a boolean mask of bright pixels via simple sigma clipping.
 
-    This simplified detector ignores the provided FWHM and identifies
-    pixels brighter than median + threshold_sigma * std, where the
-    statistics are computed with sigma clipping over finite pixels.
+def detect_stars_mask(image, fwhm_pix, threshold_sigma):
+    """Return a boolean mask of bright pixels via sigma clipping.
+
+    Args:
+        image: 2D image array.
+        fwhm_pix: FWHM in pixels (currently unused).
+        threshold_sigma: Sigma threshold above the median.
+
+    Returns:
+        Boolean mask of bright pixels.
+
+    Notes:
+        This simplified detector ignores the provided FWHM and
+        identifies pixels brighter than median + threshold_sigma * std,
+        where the statistics are computed with sigma clipping over
+        finite pixels.
     """
     data = np.asarray(image)
     mask = np.zeros_like(data, dtype=bool)
@@ -124,35 +149,48 @@ def get_sx_spectrum(
     output_dir: Union[str, Path] = ".",
     star_id: Optional[str] = None,
 ):
-    """Query SPHEREx L2 images overlapping (ra_deg, dec_deg) and perform aperture photometry.
+    """Query SPHEREx L2 images overlapping (ra_deg, dec_deg) and perform
+    aperture photometry.
 
-    Parameters
-    - ra_deg, dec_deg: target ICRS coordinates in degrees.
-    - do_photometry: force recomputation even if a cache CSV exists.
-    - bkgd_method: 'zodi' or 'annulus'.
-    - aperture_radius: circular aperture radius in pixels.
-    - annulus_r_in, annulus_r_out: annulus radii in pixels (for bkgd_method='annulus').
-    - star_fwhm, star_threshold_sigma: star masking parameters within the annulus.
-    - min_images: minimum number of images to process.
-    - max_images: maximum number of images to process.
-    - use_cutout: if True, download IRSA cutouts centered at the target; else download full MEF from AWS.
-    - max_workers: threads to resolve datalink URLs in parallel.
-    - size_pix: cutout size (square) in pixels when use_cutout=True.
-    - save_plot, save_csv: whether to save result PNG and CSV cache.
-    - show_cutout: whether to include a cutout in the saved plots.
+    Args:
+        ra_deg: Target ICRS coordinates in degrees.
+        dec_deg: Target ICRS coordinates in degrees.
+        do_photometry: Force recomputation even if a cache CSV exists.
+        bkgd_method: Background method, 'zodi' or 'annulus'.
+        aperture_radius: Circular aperture radius in pixels.
+        annulus_r_in: Annulus inner radius in pixels.
+        annulus_r_out: Annulus outer radius in pixels.
+        star_fwhm: Star mask FWHM in pixels for annulus clipping.
+        star_threshold_sigma: Sigma threshold for star masking.
+        min_images: Minimum number of images to process.
+        max_images: Maximum number of images to process.
+        use_cutout: If True, download IRSA cutouts; else use full MEF.
+        max_workers: Threads to resolve datalink URLs in parallel.
+        size_pix: Cutout size (square) in pixels when use_cutout is
+            True.
+        save_plot: Whether to save the result PNG.
+        show_cutout: Whether to include a cutout in saved plots.
+        save_csv: Whether to save the CSV cache.
+        output_dir: Output directory for plots and CSVs.
+        star_id: Optional star identifier used in output filenames.
 
-    Returns
-    - pandas.DataFrame of per-image photometry records (may be empty).
+    Returns:
+        pandas.DataFrame: Per-image photometry records (may be empty).
     """
     # CSV cache of processed photometry records
-    radecstr = f"ra{str(ra_deg).replace('.', 'p')}_{str(dec_deg).replace('.', 'p')}"
+    ra_str = str(ra_deg).replace(".", "p")
+    dec_str = str(dec_deg).replace(".", "p")
+    radecstr = f"ra{ra_str}_{dec_str}"
     _a = f"_{bkgd_method}"
     staridstr = "" if star_id in (None, "") else f"{star_id}_"
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     cache_csv = outdir / f"sxphot_cache_{staridstr}{radecstr}{_a}.csv"
 
-    log(f"Starting get_sx_spectrum for {star_id} {radecstr} {bkgd_method}")
+    log(
+        f"Starting get_sx_spectrum for {star_id} {radecstr} "
+        f"{bkgd_method}"
+    )
 
     skycoord = SkyCoord(ra=ra_deg, dec=dec_deg, unit='degree', frame='icrs')
 
@@ -181,24 +219,35 @@ def get_sx_spectrum(
     if cache_csv.exists():
         try:
             df_cache = pd.read_csv(cache_csv)
-            if (len(df_cache) >= len(results)) or (len(df_cache) >= max_images):
+            if (len(df_cache) >= len(results)) or (
+                len(df_cache) >= max_images
+            ):
                 log(
-                    f"Using cached CSV {cache_csv} with {len(df_cache)} records (>= {len(results)} results). Skipping downloads."
+                    "Using cached CSV "
+                    f"{cache_csv} with {len(df_cache)} records "
+                    f"(>= {len(results)} results). Skipping downloads."
                 )
                 records = df_cache.to_dict(orient='records')
             else:
                 log(
-                    f"Cached CSV has {len(df_cache)} records (< {len(results)} results). Will download/process all FITS."
+                    "Cached CSV has "
+                    f"{len(df_cache)} records (< {len(results)} results). "
+                    "Will download/process all FITS."
                 )
         except Exception as e:
-            log(f"⚠️ Failed to read cache CSV {cache_csv}: {e}. Will download/process all FITS.")
+            log(
+                f"⚠️ Failed to read cache CSV {cache_csv}: {e}. "
+                "Will download/process all FITS."
+            )
 
     # Collect datalink URLs
     datalink_urls = [results['access_url'][i] for i in range(len(results))]
 
     def get_download_url(datalink_url: str) -> str:
         datalink_content = DatalinkResults.from_result_url(datalink_url)
-        irsa_spectral_image_url = next(datalink_content.bysemantics("#this")).access_url
+        irsa_spectral_image_url = (
+            next(datalink_content.bysemantics("#this")).access_url
+        )
         return irsa_spectral_image_url
 
     # Resolve datalink URLs in parallel
@@ -210,7 +259,10 @@ def get_sx_spectrum(
         max_workers_local = int(max(1, max_workers_local))
         resolved = [None] * len(urls)
 
-        log(f"Resolving {len(urls)} datalink URLs with {max_workers_local} threads...")
+        log(
+            f"Resolving {len(urls)} datalink URLs with "
+            f"{max_workers_local} threads..."
+        )
 
         def _worker(idx_url):
             idx, url = idx_url
@@ -221,7 +273,9 @@ def get_sx_spectrum(
                 return idx, None
 
         with ThreadPoolExecutor(max_workers=max_workers_local) as ex:
-            futures = {ex.submit(_worker, (i, u)): i for i, u in enumerate(urls)}
+            futures = {
+                ex.submit(_worker, (i, u)): i for i, u in enumerate(urls)
+            }
             for fut in as_completed(futures):
                 idx, result = fut.result()
                 resolved[idx] = result
@@ -231,12 +285,16 @@ def get_sx_spectrum(
         log(f"Resolved {n_ok} OK, {n_bad} failed.")
         return resolved
 
-    download_urls = get_download_urls_multithreaded(datalink_urls, max_workers_local=max_workers)
+    download_urls = get_download_urls_multithreaded(
+        datalink_urls,
+        max_workers_local=max_workers,
+    )
     irsa_spectral_image_urls = [u for u in download_urls if u]
     # Map FITS basename -> IRSA spectral image URL for later cutout retrieval
     basename_to_irsa_url = {Path(u).name: u for u in irsa_spectral_image_urls}
     log(
-        f"Prepared {len(irsa_spectral_image_urls)} primary download URLs (e.g., AWS/Cutout derivable)."
+        f"Prepared {len(irsa_spectral_image_urls)} primary download "
+        "URLs (e.g., AWS/Cutout derivable)."
     )
 
     assert len(download_urls) == len(results)
@@ -244,7 +302,10 @@ def get_sx_spectrum(
     # Build local file paths (and download if needed)
     file_paths = []
     if records is None:
-        for i, irsa_spectral_image_url in zip(range(len(results)), irsa_spectral_image_urls):
+        for i, irsa_spectral_image_url in zip(
+            range(len(results)),
+            irsa_spectral_image_urls,
+        ):
             if i > max_images - 1:
                 continue
 
@@ -255,7 +316,8 @@ def get_sx_spectrum(
                 'https://nasa-irsa-spherex.s3.amazonaws.com'
             )
             irsa_cutout_image_url = (
-                irsa_spectral_image_url + f"?center={ra_deg},{dec_deg}deg&size={int(size_pix)}pix"
+                irsa_spectral_image_url
+                + f"?center={ra_deg},{dec_deg}deg&size={int(size_pix)}pix"
             )
 
             local_fname = Path(irsa_spectral_image_url).name
@@ -270,7 +332,8 @@ def get_sx_spectrum(
                 def parse_subdir_from_fname(fname: str, root: Path):
                     stem = Path(fname).stem
                     parts = stem.split('_')
-                    # Expected: [level2, 2025W27, 1A, 0253, 1D3, spx, l2b-v13-YYYY-DDD]
+                    # Expected: [level2, 2025W27, 1A, 0253, 1D3, spx,
+                    # l2b-v13-YYYY-DDD]
                     if len(parts) < 7 or parts[0].lower() != 'level2':
                         return None
                     week = parts[1]
@@ -281,7 +344,10 @@ def get_sx_spectrum(
                     detnum = m.group(1) if m else det_field
                     return root / f"{week}_{cam}" / l2b / detnum
 
-                subdir = parse_subdir_from_fname(local_fname, cache_root) or cache_root
+                subdir = (
+                    parse_subdir_from_fname(local_fname, cache_root)
+                    or cache_root
+                )
                 download_url = aws_spectral_image_url
 
             cache_root.mkdir(parents=True, exist_ok=True)
@@ -300,7 +366,10 @@ def get_sx_spectrum(
                         urlretrieve(download_url, local_path)
                         log("Download complete.")
                     except (URLError, HTTPError) as e:
-                        log(f"⚠️ Download failed: {e}. Will try current directory if available.")
+                        log(
+                            f"⚠️ Download failed: {e}. Will try current "
+                            "directory if available."
+                        )
 
             # Fallback: if download failed but file exists in CWD, use it
             if not local_path.exists():
@@ -341,25 +410,58 @@ def get_sx_spectrum(
 
                     # Defaults if extensions are missing
                     extnames = {h.name.upper() for h in hdul}
-                    var_img = hdul['VARIANCE'].data if 'VARIANCE' in extnames else np.full_like(flux_img, np.nan)
-                    flags_img = hdul['FLAGS'].data if 'FLAGS' in extnames else np.zeros_like(flux_img, dtype=np.uint32)
-                    zodi_img = hdul['ZODI'].data if 'ZODI' in extnames else np.zeros_like(flux_img)
+                    var_img = (
+                        hdul['VARIANCE'].data
+                        if 'VARIANCE' in extnames
+                        else np.full_like(flux_img, np.nan)
+                    )
+                    flags_img = (
+                        hdul['FLAGS'].data
+                        if 'FLAGS' in extnames
+                        else np.zeros_like(flux_img, dtype=np.uint32)
+                    )
+                    zodi_img = (
+                        hdul['ZODI'].data
+                        if 'ZODI' in extnames
+                        else np.zeros_like(flux_img)
+                    )
 
                     # Background subtraction
                     if bkgd_method == 'zodi':
                         img_for_phot = flux_img - zodi_img
                         bkgd_level = None
                     else:
-                        annulus = CircularAnnulus([(x, y)], r_in=annulus_r_in, r_out=annulus_r_out)
-                        ann_mask_img = annulus.to_mask(method='center')[0].to_image(shape=flux_img.shape).astype(bool)
-                        star_mask = detect_stars_mask(flux_img, fwhm_pix=star_fwhm, threshold_sigma=star_threshold_sigma)
-                        valid = ann_mask_img & (~star_mask) & np.isfinite(flux_img)
+                        annulus = CircularAnnulus(
+                            [(x, y)],
+                            r_in=annulus_r_in,
+                            r_out=annulus_r_out,
+                        )
+                        ann_mask_img = (
+                            annulus.to_mask(method='center')[0]
+                            .to_image(shape=flux_img.shape)
+                            .astype(bool)
+                        )
+                        star_mask = detect_stars_mask(
+                            flux_img,
+                            fwhm_pix=star_fwhm,
+                            threshold_sigma=star_threshold_sigma,
+                        )
+                        valid = (
+                            ann_mask_img
+                            & (~star_mask)
+                            & np.isfinite(flux_img)
+                        )
                         if np.any(valid):
-                            _, bkg_med, _ = sigma_clipped_stats(flux_img[valid], sigma=3.0, maxiters=5)
+                            _, bkg_med, _ = sigma_clipped_stats(
+                                flux_img[valid],
+                                sigma=3.0,
+                                maxiters=5,
+                            )
                             bkgd_level = float(bkg_med)
                         else:
                             bkgd_level = 0.0
-                        img_for_phot = flux_img  # subtract constant after aperture sum
+                        # Subtract constant after aperture sum.
+                        img_for_phot = flux_img
 
                     # Perform photometry
                     flux_tbl = aperture_photometry(img_for_phot, aperture)
@@ -413,17 +515,29 @@ def get_sx_spectrum(
                         "tjd_avg": mjd_avg - TJD_OFFSET,
                         "bkgd_method": bkgd_method,
                         "aperture_radius_pix": APERTURE_RADIUS,
-                        "annulus_r_in_pix": annulus_r_in if bkgd_method == 'annulus' else np.nan,
-                        "annulus_r_out_pix": annulus_r_out if bkgd_method == 'annulus' else np.nan,
+                        "annulus_r_in_pix": (
+                            annulus_r_in
+                            if bkgd_method == 'annulus'
+                            else np.nan
+                        ),
+                        "annulus_r_out_pix": (
+                            annulus_r_out
+                            if bkgd_method == 'annulus'
+                            else np.nan
+                        ),
                     })
 
                     log(f"{fpath}")
                     log(
-                        f"Pixel: ({x:.1f}, {y:.1f}), λ = {lam:.4f} µm ± {dlam:.4f}, Flux = {flux_jy:.3e} Jy"
+                        f"Pixel: ({x:.1f}, {y:.1f}), λ = {lam:.4f} µm "
+                        f"± {dlam:.4f}, Flux = {flux_jy:.3e} Jy"
                     )
 
             except Exception as e:
-                print(f" {star_id} {ix} {fpath} failed with {e}.  skipping this image.")
+                print(
+                    f" {star_id} {ix} {fpath} failed with {e}. "
+                    "skipping this image."
+                )
                 pass
 
 
@@ -434,14 +548,19 @@ def get_sx_spectrum(
         flux = np.array([r["flux_jy"] for r in records])
         err = np.array([r["flux_err_jy"] for r in records])
         mjds = np.array([r["mjd_avg"] for r in records])
-        mjds -= TJD_OFFSET # MJD to TESS julian date
+        mjds -= TJD_OFFSET  # MJD to TESS julian date
         masked_vals = [r.get("masked", False) for r in records]
-        masked = np.array([
-            bool(v) if isinstance(v, (bool, np.bool_)) else str(v).lower() in {"1", "true", "t", "yes"}
-            for v in masked_vals
-        ])
+        masked = np.array(
+            [
+                bool(v)
+                if isinstance(v, (bool, np.bool_))
+                else str(v).lower() in {"1", "true", "t", "yes"}
+                for v in masked_vals
+            ]
+        )
 
-        # Prepare a single cutout image (bluest/smallest wavelength) if requested
+        # Prepare a single cutout image (bluest/smallest wavelength) if
+        # requested.
         cutout_img = None
         cutout_wav = None
         cutout_wcs = None
@@ -460,7 +579,10 @@ def get_sx_spectrum(
 
                     # Try to use existing file if it exists and is readable
                     candidate_path = Path(str(rec_file)) if rec_file else None
-                    use_existing = candidate_path is not None and candidate_path.exists()
+                    use_existing = (
+                        candidate_path is not None
+                        and candidate_path.exists()
+                    )
 
                     if use_existing and use_cutout:
                         # Likely already a cutout; open directly
@@ -468,37 +590,54 @@ def get_sx_spectrum(
                             cutout_img = np.asarray(hdul['IMAGE'].data)
                             cutout_wcs = WCS(hdul['IMAGE'].header)
                     else:
-                        # Build an IRSA cutout URL for this specific spectral image
+                        # Build an IRSA cutout URL for this specific
+                        # spectral image.
                         base_url = basename_to_irsa_url.get(rec_fname, None)
                         if base_url is None and use_existing:
-                            # Attempt to recover by matching by name among all URLs
+                            # Attempt to recover by matching by name among
+                            # all URLs.
                             for fname, url in basename_to_irsa_url.items():
                                 if fname == rec_fname:
                                     base_url = url
                                     break
                         if base_url is not None:
                             irsa_cutout_url = (
-                                f"{base_url}?center={ra_deg},{dec_deg}deg&size={int(size_pix)}pix"
+                                f"{base_url}?center={ra_deg},{dec_deg}deg"
+                                f"&size={int(size_pix)}pix"
                             )
                             # Cache path for the cutout
-                            cache_root = Path.home() / "local" / "SPHEREX" / "cutouts"
+                            cache_root = (
+                                Path.home() / "local" / "SPHEREX" / "cutouts"
+                            )
                             subdir = cache_root / f"{radecstr}"
                             subdir.mkdir(parents=True, exist_ok=True)
                             cutout_path = subdir / (rec_fname or "cutout.fits")
                             if not cutout_path.exists():
                                 try:
-                                    log(f"Downloading display cutout to {cutout_path} ...")
+                                    log(
+                                        "Downloading display cutout to "
+                                        f"{cutout_path} ..."
+                                    )
                                     urlretrieve(irsa_cutout_url, cutout_path)
                                 except Exception as e:
-                                    log(f"⚠️ Failed to download display cutout: {e}")
+                                    log(
+                                        "⚠️ Failed to download display "
+                                        f"cutout: {e}"
+                                    )
                             if cutout_path.exists():
-                                with fits.open(cutout_path, memmap=False) as hdul:
+                                with fits.open(
+                                    cutout_path,
+                                    memmap=False,
+                                ) as hdul:
                                     cutout_img = np.asarray(hdul['IMAGE'].data)
                                     cutout_wcs = WCS(hdul['IMAGE'].header)
                         elif use_existing:
                             # Fall back: read existing (full) image and show it
                             try:
-                                with fits.open(candidate_path, memmap=False) as hdul:
+                                with fits.open(
+                                    candidate_path,
+                                    memmap=False,
+                                ) as hdul:
                                     cutout_img = np.asarray(hdul['IMAGE'].data)
                                     cutout_wcs = WCS(hdul['IMAGE'].header)
                             except Exception:
@@ -506,7 +645,16 @@ def get_sx_spectrum(
             except Exception as e:
                 log(f"⚠️ Failed preparing cutout image: {e}")
 
-        def _add_cutout_inset(fig, host_ax, image, wavelength_um, wcs_for_image, ra_deg_pt, dec_deg_pt, ap_radius_pix):
+        def _add_cutout_inset(
+            fig,
+            host_ax,
+            image,
+            wavelength_um,
+            wcs_for_image,
+            ra_deg_pt,
+            dec_deg_pt,
+            ap_radius_pix,
+        ):
             if image is None:
                 return
             try:
@@ -517,31 +665,78 @@ def get_sx_spectrum(
                 # Robust display scaling for astronomy images
                 lo, hi = np.nanpercentile(data[finite], [5, 99.5])
                 if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
-                    lo, hi = float(np.nanmin(data[finite])), float(np.nanmax(data[finite]))
+                    lo = float(np.nanmin(data[finite]))
+                    hi = float(np.nanmax(data[finite]))
                 norm = mcolors.Normalize(vmin=lo, vmax=hi)
 
                 # Inset occupying ~20% of the axis in the upper-right
-                ax_in = inset_axes(host_ax, width="20%", height="20%", loc='upper right', borderpad=0.6)
-                im = ax_in.imshow(data, origin='lower', cmap='magma', norm=norm, interpolation='nearest')
+                ax_in = inset_axes(
+                    host_ax,
+                    width="20%",
+                    height="20%",
+                    loc='upper right',
+                    borderpad=0.6,
+                )
+                im = ax_in.imshow(
+                    data,
+                    origin='lower',
+                    cmap='magma',
+                    norm=norm,
+                    interpolation='nearest',
+                )
                 ax_in.set_xticks([])
                 ax_in.set_yticks([])
 
                 # Label with wavelength
                 if wavelength_um is not None and np.isfinite(wavelength_um):
-                    ax_in.text(0.03, 0.97, f"λ={wavelength_um:.2f}µm", ha='left', va='top',
-                               transform=ax_in.transAxes, color='w', fontsize=6,
-                               bbox=dict(facecolor='k', alpha=0.35, pad=1, edgecolor='none'))
+                    bbox = dict(
+                        facecolor='k',
+                        alpha=0.35,
+                        pad=1,
+                        edgecolor='none',
+                    )
+                    ax_in.text(
+                        0.03,
+                        0.97,
+                        f"λ={wavelength_um:.2f}µm",
+                        ha='left',
+                        va='top',
+                        transform=ax_in.transAxes,
+                        color='w',
+                        fontsize=6,
+                        bbox=bbox,
+                    )
 
-                # Overlay the circular aperture at the target position using the cutout WCS
+                # Overlay the circular aperture at the target position
+                # using the cutout WCS.
                 try:
-                    if wcs_for_image is not None and np.isfinite(ap_radius_pix):
-                        sc = SkyCoord(ra=ra_deg_pt, dec=dec_deg_pt, unit='deg', frame='icrs')
-                        xpix, ypix = WCS(wcs_for_image.to_header()).world_to_pixel(sc)
-                        circ = Circle((xpix, ypix),
-                                      radius=float(ap_radius_pix), fill=False,
-                                      linewidth=0.2, edgecolor='gray')
+                    if (
+                        wcs_for_image is not None
+                        and np.isfinite(ap_radius_pix)
+                    ):
+                        sc = SkyCoord(
+                            ra=ra_deg_pt,
+                            dec=dec_deg_pt,
+                            unit='deg',
+                            frame='icrs',
+                        )
+                        xpix, ypix = WCS(
+                            wcs_for_image.to_header()
+                        ).world_to_pixel(sc)
+                        circ = Circle(
+                            (xpix, ypix),
+                            radius=float(ap_radius_pix),
+                            fill=False,
+                            linewidth=0.2,
+                            edgecolor='gray',
+                        )
                         # Add a black stroke to ensure contrast
-                        #circ.set_path_effects([pe.withStroke(linewidth=0.2, foreground='black')])
+                        # circ.set_path_effects(
+                        #     [pe.withStroke(
+                        #         linewidth=0.2,
+                        #         foreground='black',
+                        #     )]
+                        # )
                         ax_in.add_patch(circ)
                 except Exception:
                     pass
@@ -555,18 +750,42 @@ def get_sx_spectrum(
 
             # Figure 1: just the spectrum
             plt.close('all')
-            fig, ax = plt.subplots(figsize=(5,5))
-            ax.errorbar(lam[~masked], flux[~masked], yerr=err[~masked],
-                        fmt='.', capsize=3, c='k')
-            ax.errorbar(lam[masked], flux[masked], fmt='x', color='r', capsize=3)
+            fig, ax = plt.subplots(figsize=(5, 5))
+            ax.errorbar(
+                lam[~masked],
+                flux[~masked],
+                yerr=err[~masked],
+                fmt='.',
+                capsize=3,
+                c='k',
+            )
+            ax.errorbar(
+                lam[masked],
+                flux[masked],
+                fmt='x',
+                color='r',
+                capsize=3,
+            )
             ax.set_yscale('log')
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Flux (Jy)")
-            ax.set_title(f"{staridstr.replace('_',':')} α={ra_deg:.4f}, δ={dec_deg:.4f}")
+            ax.set_title(
+                f"{staridstr.replace('_',':')} α={ra_deg:.4f}, "
+                f"δ={dec_deg:.4f}"
+            )
             ax.grid(True, which='both', linestyle='--', alpha=0.5)
             # Optionally overlay a cutout inset in the upper-right
             if show_cutout:
-                _add_cutout_inset(fig, ax, cutout_img, cutout_wav, cutout_wcs, ra_deg, dec_deg, APERTURE_RADIUS)
+                _add_cutout_inset(
+                    fig,
+                    ax,
+                    cutout_img,
+                    cutout_wav,
+                    cutout_wcs,
+                    ra_deg,
+                    dec_deg,
+                    APERTURE_RADIUS,
+                )
             fig.tight_layout()
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
             savefig(fig, str(savpath), writepdf=0)
@@ -575,7 +794,7 @@ def get_sx_spectrum(
 
             # Figure 2: spectrum colored by MJD with a small colorbar
             plt.close('all')
-            fig2, ax2 = plt.subplots(figsize=(5,5))
+            fig2, ax2 = plt.subplots(figsize=(5, 5))
 
             # Establish color normalization on available MJD values
             finite_mjd = np.isfinite(mjds)
@@ -586,47 +805,88 @@ def get_sx_spectrum(
                 cmap = plt.cm.viridis
 
                 # Error bars in light gray beneath the colored points
-                ax2.errorbar(lam[~masked], flux[~masked], yerr=err[~masked],
-                             fmt='none', ecolor='0.6', elinewidth=1, capsize=2,
-                             alpha=0.7, zorder=-1)
+                ax2.errorbar(
+                    lam[~masked],
+                    flux[~masked],
+                    yerr=err[~masked],
+                    fmt='none',
+                    ecolor='0.6',
+                    elinewidth=1,
+                    capsize=2,
+                    alpha=0.7,
+                    zorder=-1,
+                )
 
-                sc = ax2.scatter(lam[~masked], flux[~masked], c=mjds[~masked],
-                                 cmap=cmap, norm=norm, s=20, edgecolors='none')
+                sc = ax2.scatter(
+                    lam[~masked],
+                    flux[~masked],
+                    c=mjds[~masked],
+                    cmap=cmap,
+                    norm=norm,
+                    s=20,
+                    edgecolors='none',
+                )
             else:
                 # Fallback if MJD is missing; plot in gray
-                sc = ax2.scatter(lam[~masked], flux[~masked], color='0.5',
-                                 s=20, edgecolors='none')
+                sc = ax2.scatter(
+                    lam[~masked],
+                    flux[~masked],
+                    color='0.5',
+                    s=20,
+                    edgecolors='none',
+                )
 
             # Mark masked points similarly to Figure 1
             if np.any(masked):
-                ax2.errorbar(lam[masked], flux[masked], fmt='x', color='r',
-                             capsize=3)
+                ax2.errorbar(
+                    lam[masked],
+                    flux[masked],
+                    fmt='x',
+                    color='r',
+                    capsize=3,
+                )
 
             ax2.set_yscale('log')
             ax2.set_xlabel("Wavelength (µm)")
             ax2.set_ylabel("Flux (Jy)")
-            ax2.set_title(f"{staridstr.replace('_',':')} α={ra_deg:.2f}, δ={dec_deg:.2f}")
+            ax2.set_title(
+                f"{staridstr.replace('_',':')} α={ra_deg:.2f}, "
+                f"δ={dec_deg:.2f}"
+            )
             ax2.grid(True, which='both', linestyle='--', alpha=0.5)
 
             # Add a small horizontal colorbar at lower-left of the plot
             try:
                 if np.any(finite_mjd):
-                    # Place colorbar within the axes area, lower-left, ~25% axis width
+                    # Place colorbar within the axes area, lower-left,
+                    # ~25% axis width.
                     axpos = ax2.get_position()
                     cb_width = 0.25 * axpos.width
                     cb_height = 0.03 * axpos.height
                     cb_left = axpos.x0 + 0.07 * axpos.width
                     cb_bottom = axpos.y0 + 0.12 * axpos.height
-                    cax = fig2.add_axes([cb_left, cb_bottom, cb_width, cb_height])
+                    cax = fig2.add_axes(
+                        [cb_left, cb_bottom, cb_width, cb_height]
+                    )
                     cb = fig2.colorbar(sc, cax=cax, orientation='horizontal')
                     cb.set_label('TESS JD')
             except Exception:
-                # If anything goes wrong with manual placement, skip the colorbar
+                # If anything goes wrong with manual placement, skip the
+                # colorbar.
                 pass
 
             # Optionally overlay the same cutout inset here too
             if show_cutout:
-                _add_cutout_inset(fig2, ax2, cutout_img, cutout_wav, cutout_wcs, ra_deg, dec_deg, APERTURE_RADIUS)
+                _add_cutout_inset(
+                    fig2,
+                    ax2,
+                    cutout_img,
+                    cutout_wav,
+                    cutout_wcs,
+                    ra_deg,
+                    dec_deg,
+                    APERTURE_RADIUS,
+                )
             fig2.tight_layout()
             savpath2 = outdir / f"{staridstr}{radecstr}{_a}_mjdc.png"
             savefig(fig2, str(savpath2), writepdf=0)
