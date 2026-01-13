@@ -81,6 +81,7 @@ BITMASK = (
 
 ARCSEC_PER_PIXEL = 6.1
 
+TJD_OFFSET = 56999.5
 
 def detect_stars_mask(image, fwhm_pix, threshold_sigma):
     """Return a boolean mask of bright pixels via simple sigma clipping.
@@ -409,6 +410,7 @@ def get_sx_spectrum(
                         "masked": is_flagged,
                         "aper_count": aper_count,
                         "mjd_avg": mjd_avg,
+                        "tjd_avg": mjd_avg - TJD_OFFSET,
                         "bkgd_method": bkgd_method,
                         "aperture_radius_pix": APERTURE_RADIUS,
                         "annulus_r_in_pix": annulus_r_in if bkgd_method == 'annulus' else np.nan,
@@ -432,7 +434,7 @@ def get_sx_spectrum(
         flux = np.array([r["flux_jy"] for r in records])
         err = np.array([r["flux_err_jy"] for r in records])
         mjds = np.array([r["mjd_avg"] for r in records])
-        mjds -= np.nanmin(mjds)
+        mjds -= TJD_OFFSET # MJD to TESS julian date
         masked_vals = [r.get("masked", False) for r in records]
         masked = np.array([
             bool(v) if isinstance(v, (bool, np.bool_)) else str(v).lower() in {"1", "true", "t", "yes"}
@@ -617,7 +619,7 @@ def get_sx_spectrum(
                     cb_bottom = axpos.y0 + 0.12 * axpos.height
                     cax = fig2.add_axes([cb_left, cb_bottom, cb_width, cb_height])
                     cb = fig2.colorbar(sc, cax=cax, orientation='horizontal')
-                    cb.set_label('Days from start')
+                    cb.set_label('TESS JD')
             except Exception:
                 # If anything goes wrong with manual placement, skip the colorbar
                 pass
