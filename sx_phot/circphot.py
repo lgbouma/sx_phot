@@ -4,6 +4,7 @@ Circular aperture photometry for SPHEREx Level-2 MEF images.
 This module exposes a callable API:
 
     get_sx_spectrum(ra_deg, dec_deg, **kwargs) -> pandas.DataFrame
+    get_supplemented_sx_spectrum(ra_deg, dec_deg, **kwargs) -> pandas.DataFrame
 
 Summary
 - Queries the IRSA TAP service for SPHEREx observations overlapping a
@@ -24,6 +25,7 @@ Background methods
 Outputs
 - result_<radec>.png in the current directory.
 - sxphot_cache_<radec>.csv in the current directory.
+- sxphot_cache_<radec>_splsupp.csv for supplemented spline diagnostics.
 
 Notes
 - Aperture area is converted from MJy/sr to Jy using the pixel solid
@@ -53,6 +55,7 @@ from datetime import datetime
 from typing import Optional, Union
 from collections import Counter
 
+from sx_phot.splinefit import fit_spherex_spectrum_bspline
 from sx_phot.visualization import _add_cutout_inset
 
 def log(message: str) -> None:
@@ -123,6 +126,38 @@ def _pick_cutout_index(
     diffs = np.full_like(wavelength_um, np.inf, dtype=float)
     diffs[finite] = np.abs(wavelength_um[finite] - target_wavelength_um)
     return int(np.argmin(diffs))
+
+
+def _coerce_mask(mask: Optional[np.ndarray], n_points: int) -> np.ndarray:
+    """Coerce a mask array to boolean values.
+
+    Args:
+        mask: Optional array-like input mask.
+        n_points: Expected length of the mask.
+
+    Returns:
+        Boolean array mask with length n_points.
+
+    Raises:
+        ValueError: If mask length does not match n_points.
+    """
+    if mask is None:
+        return np.zeros(n_points, dtype=bool)
+
+    arr = np.asarray(mask)
+    if arr.shape[0] != n_points:
+        raise ValueError(
+            f"mask length {arr.shape[0]} does not match expected {n_points}."
+        )
+
+    if arr.dtype == bool:
+        return arr
+
+    if np.issubdtype(arr.dtype, np.number):
+        return arr != 0
+
+    text = np.char.lower(arr.astype(str))
+    return np.isin(text, ["1", "true", "t", "yes", "y"])
 
 
 from astropy import units as u  # noqa: F401
@@ -909,4 +944,206 @@ def get_sx_spectrum(
         return records or []
 
 
-__all__ = ["get_sx_spectrum"]
+def get_supplemented_sx_spectrum(
+    ra_deg: float,
+    dec_deg: float,
+    *,
+    do_photometry: bool = False,
+    bkgd_method: str = 'annulus',
+    aperture_radius: float = 2.0,
+    annulus_r_in: float = 6.0,
+    annulus_r_out: float = 8.0,
+    star_fwhm: float = 2.0,
+    star_threshold_sigma: float = 5.0,
+    min_images: int = 3,
+    max_images: int = 99999,
+    max_missing_fraction: float = 0.05,
+    use_cutout: bool = True,
+    max_workers: int = 40,
+    size_pix: int = 64,
+    save_plot: bool = True,
+    show_cutout: bool = True,
+    save_csv: bool = True,
+    output_dir: Union[str, Path] = ".",
+    star_id: Optional[str] = None,
+    n_res_el: float = 4.0,
+    degree: int = 3,
+    spacing_mode: str = "log",
+    max_iter: int = 8,
+    outlier_cut: float = 3.0,
+    clip_on_normalized_residuals: bool = True,
+    dense_n_per_band: int = 800,
+    save_supp_csv: bool = True,
+    use_supp_cache: bool = True,
+) -> pd.DataFrame:
+    """Return a SPHEREx spectrum augmented with spline-fit diagnostics.
+
+    Args:
+        ra_deg: Target ICRS coordinates in degrees.
+        dec_deg: Target ICRS coordinates in degrees.
+        do_photometry: Force recomputation even if a cache CSV exists.
+        bkgd_method: Background method, 'zodi' or 'annulus'.
+        aperture_radius: Circular aperture radius in pixels.
+        annulus_r_in: Annulus inner radius in pixels.
+        annulus_r_out: Annulus outer radius in pixels.
+        star_fwhm: Star mask FWHM in pixels for annulus clipping.
+        star_threshold_sigma: Sigma threshold for star masking.
+        min_images: Minimum number of images to process.
+        max_images: Maximum number of images to process.
+        max_missing_fraction: Maximum fraction of missing cached records to
+            allow before reprocessing.
+        use_cutout: If True, download IRSA cutouts; else use full MEF.
+        max_workers: Threads to resolve datalink URLs in parallel.
+        size_pix: Cutout size (square) in pixels when use_cutout is True.
+        save_plot: Whether to save the result PNG.
+        show_cutout: Whether to include a cutout in saved plots.
+        save_csv: Whether to save the photometry CSV cache.
+        output_dir: Output directory for plots and CSVs.
+        star_id: Optional star identifier used in output filenames.
+        n_res_el: Number of resolution elements per knot interval.
+        degree: Spline degree.
+        spacing_mode: 'log' for uniform in ln(lambda), 'linear' for uniform in
+            lambda.
+        max_iter: Maximum number of clip-refit iterations per band.
+        outlier_cut: Robust sigma cut for clipping.
+        clip_on_normalized_residuals: If True, clip on (resid/err).
+        dense_n_per_band: Number of samples for dense grid per band.
+        save_supp_csv: Whether to save the supplemented CSV cache.
+        use_supp_cache: If True, reuse the supplemented cache when present.
+
+    Returns:
+        pandas.DataFrame: Photometry records with spline model columns.
+
+    Raises:
+        ValueError: If required columns are missing from the base spectrum.
+    """
+    ra_str = str(ra_deg).replace(".", "p")
+    dec_str = str(dec_deg).replace(".", "p")
+    radecstr = f"ra{ra_str}_{dec_str}"
+    _a = f"_{bkgd_method}"
+    staridstr = "" if star_id in (None, "") else f"{star_id}_"
+    outdir = Path(output_dir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    supp_cache_csv = (
+        outdir / f"sxphot_cache_{staridstr}{radecstr}{_a}_splsupp.csv"
+    )
+
+    if use_supp_cache and supp_cache_csv.exists():
+        try:
+            df_cache = pd.read_csv(supp_cache_csv)
+            log(
+                f"Using supplemented cache {supp_cache_csv} with "
+                f"{len(df_cache)} records."
+            )
+            return df_cache
+        except Exception as e:
+            log(
+                f"⚠️ Failed to read supplemented cache {supp_cache_csv}: {e}. "
+                "Will recompute."
+            )
+
+    base = get_sx_spectrum(
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        do_photometry=do_photometry,
+        bkgd_method=bkgd_method,
+        aperture_radius=aperture_radius,
+        annulus_r_in=annulus_r_in,
+        annulus_r_out=annulus_r_out,
+        star_fwhm=star_fwhm,
+        star_threshold_sigma=star_threshold_sigma,
+        min_images=min_images,
+        max_images=max_images,
+        max_missing_fraction=max_missing_fraction,
+        use_cutout=use_cutout,
+        max_workers=max_workers,
+        size_pix=size_pix,
+        save_plot=save_plot,
+        show_cutout=show_cutout,
+        save_csv=save_csv,
+        output_dir=outdir,
+        star_id=star_id,
+    )
+
+    if base is None:
+        return pd.DataFrame()
+
+    if not isinstance(base, pd.DataFrame):
+        base = pd.DataFrame(base)
+
+    if base.empty:
+        return base
+
+    required = ["wavelength_um", "bandwidth_um", "flux_jy", "flux_err_jy"]
+    missing = [name for name in required if name not in base.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
+    wavelength_um = np.asarray(base["wavelength_um"], dtype=float)
+    bandwidth_um = np.asarray(base["bandwidth_um"], dtype=float)
+    flux_jy = np.asarray(base["flux_jy"], dtype=float)
+    flux_err_jy = np.asarray(base["flux_err_jy"], dtype=float)
+    masked_vals = base["masked"] if "masked" in base.columns else None
+    mask = _coerce_mask(masked_vals, wavelength_um.size)
+
+    (
+        model_flux,
+        fit_mask,
+        _,
+        _,
+        _,
+    ) = fit_spherex_spectrum_bspline(
+        wavelength_um=wavelength_um,
+        bandwidth_um=bandwidth_um,
+        flux_jy=flux_jy,
+        flux_err_jy=flux_err_jy,
+        masked=mask,
+        n_res_el=n_res_el,
+        degree=degree,
+        spacing_mode=spacing_mode,
+        max_iter=max_iter,
+        outlier_cut=outlier_cut,
+        clip_on_normalized_residuals=clip_on_normalized_residuals,
+        dense_n_per_band=dense_n_per_band,
+    )
+
+    finite = (
+        np.isfinite(wavelength_um)
+        & np.isfinite(flux_jy)
+        & np.isfinite(flux_err_jy)
+    )
+    mask = mask | (~finite)
+    use = ~mask
+    fit_used = (
+        use if fit_mask is None else np.asarray(fit_mask, dtype=bool) & use
+    )
+    clipped = use & (~fit_used)
+    clipped &= np.isfinite(model_flux)
+
+    residuals = flux_jy - model_flux
+    res_valid = np.isfinite(residuals) & fit_used & np.isfinite(flux_err_jy)
+    res_masked = np.isfinite(residuals) & mask
+    res_clipped = np.isfinite(residuals) & clipped
+
+    supplemented = base.copy()
+    supplemented["model_flux"] = model_flux
+    supplemented["fit_mask"] = fit_used
+    supplemented["residuals"] = residuals
+    supplemented["res_valid"] = res_valid
+    supplemented["res_masked"] = res_masked
+    supplemented["res_clipped"] = res_clipped
+
+    if save_supp_csv:
+        try:
+            supplemented.to_csv(supp_cache_csv, index=False)
+            log(
+                f"Saved supplemented cache {supp_cache_csv} with "
+                f"{len(supplemented)} records."
+            )
+        except Exception as e:
+            log(f"⚠️ Failed to save supplemented cache {supp_cache_csv}: {e}")
+
+    return supplemented
+
+
+__all__ = ["get_sx_spectrum", "get_supplemented_sx_spectrum"]
