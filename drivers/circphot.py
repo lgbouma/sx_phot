@@ -48,7 +48,6 @@ import os
 import re
 import argparse
 from astropy.io import fits
-import matplotlib.pyplot as plt
 import numpy as np
 from astropy.wcs import WCS
 from astropy.table import Table
@@ -60,6 +59,8 @@ from urllib.request import urlretrieve
 from urllib.error import URLError, HTTPError
 from pathlib import Path
 from datetime import datetime
+
+from sx_phot.visualization import plot_simple_spectrum
 
 def log(message: str) -> None:
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -380,25 +381,17 @@ if records:
     lam = np.array([r["wavelength_um"] for r in records])
     flux = np.array([r["flux_jy"] for r in records])
     err = np.array([r["flux_err_jy"] for r in records])
-    # Robustly coerce 'masked' to boolean for plotting
-    masked_vals = [r.get("masked", False) for r in records]
-    masked = np.array([
-        bool(v) if isinstance(v, (bool, np.bool_)) else str(v).lower() in {"1", "true", "t", "yes"}
-        for v in masked_vals
-    ])
-
-    plt.figure(figsize=(8, 5))
-    plt.errorbar(lam[~masked], flux[~masked], yerr=err[~masked], fmt='.', capsize=3)
-    plt.errorbar(lam[masked], flux[masked], fmt='x', color = 'r', capsize=3)
-    plt.yscale('log')
-    plt.xlabel("Wavelength (µm)")
-    plt.ylabel("Flux (Jy)")
-    plt.title(f"SPHEREx Spectrum at RA={ra_deg:.4f}, Dec={dec_deg:.4f}")
-    plt.grid(True, which='both', linestyle='--', alpha=0.5)
-    plt.tight_layout()
-    #plt.ylim([2e-2, 6e-1])
+    masked = [r.get("masked", False) for r in records]
     savpath = f'result_{radecstr}{_a}.png'
-    plt.savefig(savpath, dpi=300)
+    plot_simple_spectrum(
+        wavelength_um=lam,
+        flux_jy=flux,
+        flux_err_jy=err,
+        masked=masked,
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        output_path=savpath,
+    )
     log(f"Saved {savpath}")
     # Save/update CSV cache after plotting
     try:

@@ -51,6 +51,78 @@ def _apply_plot_style() -> None:
         set_style("default")
 
 
+def plot_simple_spectrum(
+    wavelength_um: np.ndarray,
+    flux_jy: np.ndarray,
+    flux_err_jy: np.ndarray,
+    *,
+    masked: Optional[np.ndarray] = None,
+    title: Optional[str] = None,
+    ra_deg: Optional[float] = None,
+    dec_deg: Optional[float] = None,
+    output_path: Optional[Union[str, Path]] = None,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Plot a SPHEREx spectrum with optional masked points.
+
+    Args:
+        wavelength_um: Wavelengths (microns).
+        flux_jy: Fluxes (Jy).
+        flux_err_jy: Flux uncertainties (Jy).
+        masked: Optional mask; True values are excluded from the main points.
+        title: Optional plot title.
+        ra_deg: Optional RA in degrees for title formatting.
+        dec_deg: Optional Dec in degrees for title formatting.
+        output_path: Optional path to save the figure.
+
+    Returns:
+        (figure, axis) handle for the plot.
+    """
+    wavelength_um = np.asarray(wavelength_um, dtype=float)
+    flux_jy = np.asarray(flux_jy, dtype=float)
+    flux_err_jy = np.asarray(flux_err_jy, dtype=float)
+
+    n_points = wavelength_um.size
+    if flux_jy.size != n_points or flux_err_jy.size != n_points:
+        raise ValueError("Input arrays must have matching lengths.")
+
+    mask = _coerce_mask(masked, n_points)
+
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    if np.any(~mask):
+        ax.errorbar(
+            wavelength_um[~mask],
+            flux_jy[~mask],
+            yerr=flux_err_jy[~mask],
+            fmt=".",
+            capsize=3,
+        )
+    if np.any(mask):
+        ax.errorbar(
+            wavelength_um[mask],
+            flux_jy[mask],
+            fmt="x",
+            color="r",
+            capsize=3,
+            alpha=0.7,
+        )
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Wavelength (µm)")
+    ax.set_ylabel("Flux (Jy)")
+    if title is None and ra_deg is not None and dec_deg is not None:
+        title = f"SPHEREx Spectrum at RA={ra_deg:.4f}, Dec={dec_deg:.4f}"
+    if title:
+        ax.set_title(title)
+    ax.grid(True, which="both", linestyle="--", alpha=0.5)
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=300)
+
+    return fig, ax
+
+
 def plot_spectrum_with_spline(
     wavelength_um: np.ndarray,
     flux_jy: np.ndarray,
@@ -379,4 +451,4 @@ def plot_spectrum_with_spline(
     return fig, ax_spec
 
 
-__all__ = ["plot_spectrum_with_spline"]
+__all__ = ["plot_simple_spectrum", "plot_spectrum_with_spline"]
