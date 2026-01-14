@@ -10,6 +10,12 @@ import numpy as np
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
+from matplotlib.patches import Circle
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 
 from aesthetic.plot import savefig, set_style
 
@@ -49,6 +55,105 @@ def _apply_plot_style() -> None:
         set_style("science")
     except OSError:
         set_style("default")
+
+
+def _add_cutout_inset(
+    fig: plt.Figure,
+    host_ax: plt.Axes,
+    image: Optional[np.ndarray],
+    wavelength_um: Optional[float],
+    wcs_for_image: Optional[WCS],
+    ra_deg_pt: float,
+    dec_deg_pt: float,
+    ap_radius_pix: float,
+) -> None:
+    """Add a small cutout inset with the aperture overlay to a host axis.
+
+    Args:
+        fig: Figure containing the host axis (unused, retained for API).
+        host_ax: Axis to place the inset within.
+        image: 2D image array to display.
+        wavelength_um: Wavelength label for the inset.
+        wcs_for_image: WCS for converting RA/Dec to image pixels.
+        ra_deg_pt: RA in degrees for the aperture center.
+        dec_deg_pt: Dec in degrees for the aperture center.
+        ap_radius_pix: Aperture radius in pixels.
+    """
+    if image is None:
+        return
+    try:
+        data = np.asarray(image)
+        finite = np.isfinite(data)
+        if not np.any(finite):
+            return
+        # Robust display scaling for astronomy images.
+        lo, hi = np.nanpercentile(data[finite], [5, 99.5])
+        if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+            lo = float(np.nanmin(data[finite]))
+            hi = float(np.nanmax(data[finite]))
+        norm = mcolors.Normalize(vmin=lo, vmax=hi)
+
+        # Inset occupying ~20% of the axis in the upper-right.
+        ax_in = inset_axes(
+            host_ax,
+            width="20%",
+            height="20%",
+            loc="upper right",
+            borderpad=0.6,
+        )
+        ax_in.imshow(
+            data,
+            origin="lower",
+            cmap="magma",
+            norm=norm,
+            interpolation="nearest",
+        )
+        ax_in.set_xticks([])
+        ax_in.set_yticks([])
+
+        # Label with wavelength.
+        if wavelength_um is not None and np.isfinite(wavelength_um):
+            bbox = dict(
+                facecolor="k",
+                alpha=0.35,
+                pad=1,
+                edgecolor="none",
+            )
+            ax_in.text(
+                0.03,
+                0.97,
+                f"λ={wavelength_um:.2f}µm",
+                ha="left",
+                va="top",
+                transform=ax_in.transAxes,
+                color="w",
+                fontsize=6,
+                bbox=bbox,
+            )
+
+        # Overlay the circular aperture at the target position
+        # using the cutout WCS.
+        try:
+            if wcs_for_image is not None and np.isfinite(ap_radius_pix):
+                sc = SkyCoord(
+                    ra=ra_deg_pt,
+                    dec=dec_deg_pt,
+                    unit="deg",
+                    frame="icrs",
+                )
+                xpix, ypix = WCS(wcs_for_image.to_header()).world_to_pixel(sc)
+                circ = Circle(
+                    (xpix, ypix),
+                    radius=float(ap_radius_pix),
+                    fill=False,
+                    linewidth=0.2,
+                    edgecolor="gray",
+                )
+                ax_in.add_patch(circ)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def plot_simple_spectrum(
