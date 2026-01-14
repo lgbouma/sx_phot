@@ -101,6 +101,30 @@ def _is_cache_complete(
     return missing_frac <= max_missing_fraction
 
 
+def _pick_cutout_index(
+    wavelength_um: np.ndarray,
+    target_wavelength_um: float,
+) -> Optional[int]:
+    """Return the index of the wavelength closest to a target value.
+
+    Args:
+        wavelength_um: Wavelength array in microns.
+        target_wavelength_um: Target wavelength in microns.
+
+    Returns:
+        Index of the closest wavelength, or None if no finite values exist.
+    """
+    wavelength_um = np.asarray(wavelength_um, dtype=float)
+    if wavelength_um.size == 0:
+        return None
+    finite = np.isfinite(wavelength_um)
+    if not np.any(finite):
+        return None
+    diffs = np.full_like(wavelength_um, np.inf, dtype=float)
+    diffs[finite] = np.abs(wavelength_um[finite] - target_wavelength_um)
+    return int(np.argmin(diffs))
+
+
 from astropy import units as u  # noqa: F401
 from photutils.aperture import (
     CircularAperture,
@@ -608,22 +632,21 @@ def get_sx_spectrum(
             ]
         )
 
-        # Prepare a single cutout image (bluest/smallest wavelength) if
-        # requested.
+        # Prepare a single cutout image near the band-1 center if requested.
         cutout_img = None
         cutout_wav = None
         cutout_wcs = None
+        cutout_source_path: Optional[Path] = None
         if show_cutout:
             try:
-                finite_lam = np.isfinite(lam)
-                if np.any(finite_lam):
-                    idx_min = int(np.nanargmin(lam[finite_lam]))
-                    # Map back to full index space
-                    idxs = np.where(finite_lam)[0]
-                    idx_min_full = int(idxs[idx_min])
-                    rec_min = records[idx_min_full]
-                    cutout_wav = float(rec_min.get("wavelength_um", np.nan))
-                    rec_file = rec_min.get("file", "")
+                target_wav = 0.93
+                idx_cutout = _pick_cutout_index(lam, target_wav)
+                if idx_cutout is not None:
+                    rec_cutout = records[idx_cutout]
+                    cutout_wav = float(
+                        rec_cutout.get("wavelength_um", np.nan)
+                    )
+                    rec_file = rec_cutout.get("file", "")
                     rec_fname = Path(str(rec_file)).name if rec_file else None
 
                     # Try to use existing file if it exists and is readable
@@ -638,6 +661,7 @@ def get_sx_spectrum(
                         with fits.open(candidate_path, memmap=False) as hdul:
                             cutout_img = np.asarray(hdul['IMAGE'].data)
                             cutout_wcs = WCS(hdul['IMAGE'].header)
+                        cutout_source_path = candidate_path
                     else:
                         # Build an IRSA cutout URL for this specific
                         # spectral image.
@@ -680,6 +704,7 @@ def get_sx_spectrum(
                                 ) as hdul:
                                     cutout_img = np.asarray(hdul['IMAGE'].data)
                                     cutout_wcs = WCS(hdul['IMAGE'].header)
+                                cutout_source_path = cutout_path
                         elif use_existing:
                             # Fall back: read existing (full) image and show it
                             try:
@@ -689,8 +714,31 @@ def get_sx_spectrum(
                                 ) as hdul:
                                     cutout_img = np.asarray(hdul['IMAGE'].data)
                                     cutout_wcs = WCS(hdul['IMAGE'].header)
+                                cutout_source_path = candidate_path
                             except Exception:
                                 pass
+                if cutout_img is not None and cutout_source_path is not None:
+                    log(f"Cutout FITS source: {cutout_source_path}")
+                if cutout_wcs is not None:
+                    try:
+                        sc = SkyCoord(
+                            ra=ra_deg,
+                            dec=dec_deg,
+                            unit="deg",
+                            frame="icrs",
+                        )
+                        xpix, ypix = WCS(
+                            cutout_wcs.to_header()
+                        ).world_to_pixel(sc)
+                        log(
+                            "Cutout aperture center (x, y) = "
+                            f"({xpix:.2f}, {ypix:.2f})"
+                        )
+                    except Exception as e:
+                        log(
+                            "⚠️ Failed to compute cutout aperture center: "
+                            f"{e}"
+                        )
             except Exception as e:
                 log(f"⚠️ Failed preparing cutout image: {e}")
 
