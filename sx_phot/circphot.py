@@ -40,9 +40,6 @@ import re
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from matplotlib.patches import Circle
-import matplotlib.patheffects as pe
 import numpy as np
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
@@ -56,6 +53,7 @@ from datetime import datetime
 from typing import Optional, Union
 from collections import Counter
 
+from sx_phot.visualization import _add_cutout_inset
 
 def log(message: str) -> None:
     """Log a timestamped message.
@@ -65,6 +63,42 @@ def log(message: str) -> None:
     """
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{ts}] {message}")
+
+
+def _missing_fraction(cache_len: int, expected_len: int) -> float:
+    """Return the fraction of expected records missing from the cache.
+
+    Args:
+        cache_len: Number of cached records.
+        expected_len: Expected number of records.
+
+    Returns:
+        Fraction of missing records in the cache.
+    """
+    if expected_len <= 0:
+        return 0.0
+    if cache_len >= expected_len:
+        return 0.0
+    return (expected_len - cache_len) / expected_len
+
+
+def _is_cache_complete(
+    cache_len: int,
+    expected_len: int,
+    max_missing_fraction: float,
+) -> bool:
+    """Return True if the cache is within the missing fraction threshold.
+
+    Args:
+        cache_len: Number of cached records.
+        expected_len: Expected number of records.
+        max_missing_fraction: Maximum fraction of missing records to allow.
+
+    Returns:
+        True if the cache is complete enough to reuse.
+    """
+    missing_frac = _missing_fraction(cache_len, expected_len)
+    return missing_frac <= max_missing_fraction
 
 
 from astropy import units as u  # noqa: F401
@@ -140,6 +174,7 @@ def get_sx_spectrum(
     star_threshold_sigma: float = 5.0,
     min_images: int = 3,
     max_images: int = 99999,
+    max_missing_fraction: float = 0.05,
     use_cutout: bool = True,
     max_workers: int = 40,
     size_pix: int = 64,
@@ -164,6 +199,8 @@ def get_sx_spectrum(
         star_threshold_sigma: Sigma threshold for star masking.
         min_images: Minimum number of images to process.
         max_images: Maximum number of images to process.
+        max_missing_fraction: Maximum fraction of missing cached records to
+            allow before reprocessing.
         use_cutout: If True, download IRSA cutouts; else use full MEF.
         max_workers: Threads to resolve datalink URLs in parallel.
         size_pix: Cutout size (square) in pixels when use_cutout is
@@ -219,19 +256,31 @@ def get_sx_spectrum(
     if cache_csv.exists():
         try:
             df_cache = pd.read_csv(cache_csv)
-            if (len(df_cache) >= len(results)) or (
-                len(df_cache) >= max_images
+            expected_count = (
+                len(results)
+                if max_images is None
+                else min(len(results), max_images)
+            )
+            missing_count = max(expected_count - len(df_cache), 0)
+            missing_frac = _missing_fraction(len(df_cache), expected_count)
+            if _is_cache_complete(
+                len(df_cache),
+                expected_count,
+                max_missing_fraction,
             ):
                 log(
                     "Using cached CSV "
                     f"{cache_csv} with {len(df_cache)} records "
-                    f"(>= {len(results)} results). Skipping downloads."
+                    f"({missing_count} missing of {expected_count}, "
+                    f"{missing_frac:.1%}). Skipping downloads."
                 )
                 records = df_cache.to_dict(orient='records')
             else:
                 log(
                     "Cached CSV has "
-                    f"{len(df_cache)} records (< {len(results)} results). "
+                    f"{len(df_cache)} records; {missing_count} of "
+                    f"{expected_count} ({missing_frac:.1%}) missing "
+                    f"exceeds {max_missing_fraction:.1%}. "
                     "Will download/process all FITS."
                 )
         except Exception as e:
@@ -644,104 +693,6 @@ def get_sx_spectrum(
                                 pass
             except Exception as e:
                 log(f"⚠️ Failed preparing cutout image: {e}")
-
-        def _add_cutout_inset(
-            fig,
-            host_ax,
-            image,
-            wavelength_um,
-            wcs_for_image,
-            ra_deg_pt,
-            dec_deg_pt,
-            ap_radius_pix,
-        ):
-            if image is None:
-                return
-            try:
-                data = np.asarray(image)
-                finite = np.isfinite(data)
-                if not np.any(finite):
-                    return
-                # Robust display scaling for astronomy images
-                lo, hi = np.nanpercentile(data[finite], [5, 99.5])
-                if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
-                    lo = float(np.nanmin(data[finite]))
-                    hi = float(np.nanmax(data[finite]))
-                norm = mcolors.Normalize(vmin=lo, vmax=hi)
-
-                # Inset occupying ~20% of the axis in the upper-right
-                ax_in = inset_axes(
-                    host_ax,
-                    width="20%",
-                    height="20%",
-                    loc='upper right',
-                    borderpad=0.6,
-                )
-                im = ax_in.imshow(
-                    data,
-                    origin='lower',
-                    cmap='magma',
-                    norm=norm,
-                    interpolation='nearest',
-                )
-                ax_in.set_xticks([])
-                ax_in.set_yticks([])
-
-                # Label with wavelength
-                if wavelength_um is not None and np.isfinite(wavelength_um):
-                    bbox = dict(
-                        facecolor='k',
-                        alpha=0.35,
-                        pad=1,
-                        edgecolor='none',
-                    )
-                    ax_in.text(
-                        0.03,
-                        0.97,
-                        f"λ={wavelength_um:.2f}µm",
-                        ha='left',
-                        va='top',
-                        transform=ax_in.transAxes,
-                        color='w',
-                        fontsize=6,
-                        bbox=bbox,
-                    )
-
-                # Overlay the circular aperture at the target position
-                # using the cutout WCS.
-                try:
-                    if (
-                        wcs_for_image is not None
-                        and np.isfinite(ap_radius_pix)
-                    ):
-                        sc = SkyCoord(
-                            ra=ra_deg_pt,
-                            dec=dec_deg_pt,
-                            unit='deg',
-                            frame='icrs',
-                        )
-                        xpix, ypix = WCS(
-                            wcs_for_image.to_header()
-                        ).world_to_pixel(sc)
-                        circ = Circle(
-                            (xpix, ypix),
-                            radius=float(ap_radius_pix),
-                            fill=False,
-                            linewidth=0.2,
-                            edgecolor='gray',
-                        )
-                        # Add a black stroke to ensure contrast
-                        # circ.set_path_effects(
-                        #     [pe.withStroke(
-                        #         linewidth=0.2,
-                        #         foreground='black',
-                        #     )]
-                        # )
-                        ax_in.add_patch(circ)
-                except Exception:
-                    pass
-            except Exception:
-                pass
 
         if save_plot:
 
