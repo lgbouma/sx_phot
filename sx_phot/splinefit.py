@@ -397,11 +397,11 @@ def fit_spherex_spectrum_bspline(
     flux_jy: np.ndarray,
     flux_err_jy: np.ndarray,
     masked: Optional[np.ndarray] = None,
-    n_res_el: float = 3.0,
+    n_res_el: float = 4.0,
     degree: int = 3,
     spacing_mode: str = "log",
     max_iter: int = 8,
-    outlier_cut: float = 4.0,
+    outlier_cut: float = 3.0,
     clip_on_normalized_residuals: bool = True,
     dense_n_per_band: int = 800,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, BandSplineResult]]:
