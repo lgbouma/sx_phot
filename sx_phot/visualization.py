@@ -129,13 +129,13 @@ def plot_spectrum_with_spline(
 
     _apply_plot_style()
     if show_residuals:
-        fig = plt.figure(figsize=(5, 7))
-        grid = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.05)
+        fig = plt.figure(figsize=(5, 7), constrained_layout=True)
+        grid = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1])
         ax_spec = fig.add_subplot(grid[0])
         ax_res = fig.add_subplot(grid[1], sharex=ax_spec)
         ax_res_norm = fig.add_subplot(grid[2], sharex=ax_spec)
     else:
-        fig, ax_spec = plt.subplots(figsize=(5, 5))
+        fig, ax_spec = plt.subplots(figsize=(5, 5), constrained_layout=True)
         ax_res = None
         ax_res_norm = None
 
@@ -320,9 +320,9 @@ def plot_spectrum_with_spline(
 
     if show_residuals and ax_res_norm is not None:
         residuals = flux_jy - model_flux
-        valid_err = np.isfinite(flux_err_jy) & (flux_err_jy > 0)
+        valid_model = np.isfinite(model_flux) & (model_flux != 0)
         norm = np.full_like(residuals, np.nan)
-        norm[valid_err] = residuals[valid_err] / flux_err_jy[valid_err]
+        norm[valid_model] = residuals[valid_model] / model_flux[valid_model]
 
         norm_valid = np.isfinite(norm) & fit_used
         norm_masked = np.isfinite(norm) & mask
@@ -366,13 +366,11 @@ def plot_spectrum_with_spline(
             if amp > 0:
                 ax_res_norm.set_ylim(-1.1 * amp, 1.1 * amp)
         ax_res_norm.axhline(0.0, color="0.5", linewidth=0.8, zorder=0)
-        ax_res_norm.set_ylabel("Residual / err (sigma)")
+        ax_res_norm.set_ylabel("(Flux - Spline)\n/ Spline")
         ax_res_norm.set_xlabel("Wavelength (um)")
         ax_res_norm.grid(True, which="both", linestyle="--", alpha=0.4)
         if ax_res is not None:
             plt.setp(ax_res.get_xticklabels(), visible=False)
-    fig.tight_layout()
-
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
