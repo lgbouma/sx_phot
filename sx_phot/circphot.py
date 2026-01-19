@@ -597,6 +597,7 @@ def get_sx_spectrum(
                     aper_flags = flags_img[aper_mask.astype(bool)]
                     is_flagged = np.any(aper_flags & BITMASK)
                     aper_count = str(dict(Counter(aper_flags)))
+                    quality_flags = ",".join(np.unique(aper_flags).astype(str))
 
                     # Wavelength solution
                     wave_wcs = WCS(hdul[1].header, hdul, key='W')
@@ -618,6 +619,7 @@ def get_sx_spectrum(
                         "flux_err_jy": flux_err_jy,
                         "file": fpath,
                         "masked": is_flagged,
+                        "quality": quality_flags,
                         "aper_count": aper_count,
                         "mjd_avg": mjd_avg,
                         "tjd_avg": mjd_avg - TJD_OFFSET,
