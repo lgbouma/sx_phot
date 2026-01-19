@@ -18,13 +18,16 @@ CATALOG_REL_PATHS = (
         "Kostov_2025_tess10k_apjsade2d8t3_mrt.txt"
     ),
 )
-ECL_LAT_RANGE_DEG = (-76.0, -72.0)
-TEFF_MAX_K = 6500.0
+ECL_LAT_MAX_DEG = -72.0
+TMAG_MAX = 14.5
+PER_MAX_DAYS = 2.0
 RANDOM_SEED = 42
-SAMPLE_SIZE = 50
 OUTPUT_SUBDIR = Path("results/random_ebs")
 OUTPUT_NAME = (
-    "kostov_2025_ebs_ecl_lat_-76_-72_teff_lt_6500.csv"
+    "kostov_2025_ebs_ecl_lat_lt_-72_tmag_lt_14p5_per_lt_2.csv"
+)
+OUTPUT_TXT_NAME = (
+    "kostov_2025_ebs_ecl_lat_lt_-72_tmag_lt_14p5_per_lt_2.txt"
 )
 
 
@@ -109,7 +112,7 @@ def add_ecliptic_columns(table: Table) -> None:
 
 
 def filter_catalog(table: Table) -> Table:
-    """Filter the catalog by ecliptic latitude and temperature.
+    """Filter the catalog by ecliptic latitude, TESS magnitude, and period.
 
     Args:
         table: Catalog table with ecliptic latitude, period, and Teff.
@@ -117,13 +120,13 @@ def filter_catalog(table: Table) -> Table:
     Returns:
         Filtered table sorted by period.
     """
-    lat_min, lat_max = sorted(ECL_LAT_RANGE_DEG)
     lat = np.asarray(table["ecl_lat_deg"], dtype=float)
-    teff = np.asarray(table["Teff"], dtype=float)
+    tmag = np.asarray(table["Tmag"], dtype=float)
+    per = np.asarray(table["Per"], dtype=float)
     mask = (
-        (lat >= lat_min)
-        & (lat <= lat_max)
-        & (teff < TEFF_MAX_K)
+        (lat < ECL_LAT_MAX_DEG)
+        & (tmag < TMAG_MAX)
+        & (per < PER_MAX_DAYS)
     )
     filtered = table[mask]
     filtered.sort("Per")
@@ -153,30 +156,36 @@ def _format_float(value: object, fmt: str) -> str:
     return f"{val:{fmt}}"
 
 
-def print_random_draws(table: Table) -> None:
-    """Print a random subset of the filtered table.
+def format_row(row: object) -> str:
+    """Format a row for CSV-like printing.
+
+    Args:
+        row: Table row with required fields.
+    """
+    tic = _format_id(row["TIC"])
+    ra = _format_float(row["RAdeg"], ".6f")
+    dec = _format_float(row["DEdeg"], ".6f")
+    tmag = _format_float(row["Tmag"], ".3f")
+    per = _format_float(row["Per"], ".6f")
+    t0 = _format_float(row["T0-pri"], ".6f")
+    return f"{tic}, {ra}, {dec}, {tmag}, {per}, {t0}"
+
+
+def write_text_list(table: Table, output_path: Path) -> None:
+    """Write the filtered catalog to a plain text list.
 
     Args:
         table: Filtered catalog table.
+        output_path: Destination text file path.
     """
     if len(table) == 0:
-        print("No rows remain after filtering.")
+        print("No rows remain after filtering; skipping text output.")
         return
 
-    rng = np.random.default_rng(RANDOM_SEED)
-    n_draws = min(SAMPLE_SIZE, len(table))
-    indices = rng.choice(len(table), size=n_draws, replace=False)
-    sample = table[indices]
-
-    print(f"Random draws (seed={RANDOM_SEED}, n={n_draws}):")
-    print("TIC, RAdeg, DEdeg, Tmag, Per")
-    for row in sample:
-        tic = _format_id(row["TIC"])
-        ra = _format_float(row["RAdeg"], ".6f")
-        dec = _format_float(row["DEdeg"], ".6f")
-        tmag = _format_float(row["Tmag"], ".3f")
-        per = _format_float(row["Per"], ".6f")
-        print(f"{tic}, {ra}, {dec}, {tmag}, {per}")
+    with output_path.open("w", encoding="utf-8") as handle:
+        handle.write("TIC, RAdeg, DEdeg, Tmag, Per, T0-pri\n")
+        for row in table:
+            handle.write(f"{format_row(row)}\n")
 
 
 def main() -> None:
@@ -187,8 +196,7 @@ def main() -> None:
 
     table = load_catalog(catalog_path)
     require_columns(
-        table,
-        ["RAdeg", "DEdeg", "Per", "Teff", "TIC", "Tmag"],
+        table, ["RAdeg", "DEdeg", "Per", "TIC", "Tmag", "T0-pri"]
     )
     add_ecliptic_columns(table)
     filtered = filter_catalog(table)
@@ -196,8 +204,10 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     filtered.write(output_path, format="ascii.csv", overwrite=True)
     print(f"Wrote {len(filtered)} rows to {output_path}")
-
-    print_random_draws(filtered)
+    text_path = output_path.with_name(OUTPUT_TXT_NAME)
+    write_text_list(filtered, text_path)
+    if text_path.exists():
+        print(f"Wrote text list to {text_path}")
 
 
 if __name__ == "__main__":
