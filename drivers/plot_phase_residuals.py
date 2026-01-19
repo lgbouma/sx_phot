@@ -259,14 +259,25 @@ def plot_phase_residuals(
             )
 
     if np.any(res_masked):
-        ax.errorbar(
+        ax.scatter(
             phase[res_masked],
             norm[res_masked],
-            fmt="x",
-            color="r",
-            capsize=3,
-            alpha=0.3,
+            marker="x",
+            color="black",
+            s=36,
+            linewidths=0.7,
+            alpha=0.6,
             zorder=1,
+        )
+        ax.scatter(
+            phase[res_masked],
+            norm[res_masked],
+            marker="x",
+            color="r",
+            s=25,
+            linewidths=0.6,
+            alpha=0.3,
+            zorder=2,
             label="masked",
         )
 
@@ -275,11 +286,23 @@ def plot_phase_residuals(
             phase[res_clipped],
             norm[res_clipped],
             facecolors="none",
+            edgecolors="black",
+            marker="o",
+            s=36,
+            linewidths=0.6,
+            alpha=0.8,
+            zorder=2,
+        )
+        ax.scatter(
+            phase[res_clipped],
+            norm[res_clipped],
+            facecolors="none",
             edgecolors="C3",
             marker="o",
             s=32,
+            linewidths=0.6,
             alpha=0.8,
-            zorder=2,
+            zorder=3,
             label="clipped",
         )
 
@@ -293,7 +316,7 @@ def plot_phase_residuals(
             capsize=3,
             ecolor="0.6",
             elinewidth=1,
-            alpha=0.7,
+            alpha=0.35,
             zorder=2,
         )
         finite_lam = res_valid & np.isfinite(lam)
@@ -308,7 +331,8 @@ def plot_phase_residuals(
                 cmap=plt.cm.magma,
                 norm=norm_lam,
                 s=20,
-                edgecolors="none",
+                edgecolors="black",
+                linewidths=0.3,
                 zorder=3,
                 label="used",
             )
@@ -318,14 +342,15 @@ def plot_phase_residuals(
                 norm[res_valid],
                 color="k",
                 s=20,
-                edgecolors="none",
+                edgecolors="black",
+                linewidths=0.3,
                 zorder=3,
                 label="used",
             )
 
     ax.axhline(0.0, color="0.5", linewidth=0.8, zorder=0)
     ax.set_yscale("linear")
-    ax.set_xlim(0.0, 1.0)
+    ax.set_xlim(-0.15, 1.15)
     ax.set_xlabel("Phase")
     ax.set_ylabel("(Flux - Spline) / Spline")
     ax.grid(True, which="both", linestyle="--", alpha=0.5)
