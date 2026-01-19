@@ -1,10 +1,18 @@
 #!/Users/luke/local/miniconda3/envs/py311_sx/bin/python
-"""Plot a phase-folded normalized residual light curve from a cache CSV.
+"""Plot phase-folded normalized residuals from a supplemented cache CSV.
 
-The normalized residuals are defined as (flux_jy - model_flux) / model_flux,
-the used points are colored by wavelength (magma), and a sinusoid is fit to
-points with wavelength_um > 1.0. The ephemeris reference time (t0) is specified
-in TESS Julian Date (TJD).
+The normalized residuals are defined as (flux_jy - model_flux) / model_flux.
+Used points are colored by wavelength (magma), and a sinusoid is fit to points
+with wavelength_um > 1.0. The ephemeris reference time (t0) is specified in
+TESS Julian Date (TJD).
+
+Options:
+    --csv PATH         Input supplemented cache CSV (default: example in test_results).
+    --t0_tjd FLOAT     Reference epoch in TJD.
+    --period_days FLOAT
+                       Period in days.
+    --ylim LOW,HIGH    Optional y-limits (use 'auto' or 'none' for defaults).
+    --out PATH         Output PNG path (default: alongside CSV).
 """
 
 from __future__ import annotations
@@ -350,6 +358,7 @@ def plot_phase_residuals(
 
     if out_path is not None:
         fig.savefig(out_path, dpi=300)
+        print(f"Wrote phase residuals plot to {out_path}")
 
     plt.close(fig)
 

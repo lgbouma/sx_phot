@@ -1,11 +1,24 @@
-"""Run SPHEREx aperture photometry for a TIC target using mean coordinates."""
+"""Run SPHEREx aperture photometry for a TIC target using mean coordinates.
+
+Usage:
+    /Users/luke/local/miniconda3/envs/py311_sx/bin/python \
+        drivers/run_tic_circphot.py TIC_300651846
+    /Users/luke/local/miniconda3/envs/py311_sx/bin/python \
+        drivers/run_tic_circphot.py 300651846
+
+API:
+    - normalize_tic_id(tic_id) coerces TIC identifiers to integers.
+    - get_mean_spherex_coords(tic_id) returns mean RA/Dec propagated for SPHEREx.
+    - get_sx_spectrum(...) runs the aperture photometry and writes outputs to
+      test_results/ using IRSA cutouts by default.
+"""
 
 from __future__ import annotations
 
 import argparse
 
 from get_tic_spherex_coords import get_mean_spherex_coords
-from sx_phot.circphot import get_sx_spectrum
+from sx_phot.circphot import get_supplemented_sx_spectrum
 from sx_phot.tic_motion import normalize_tic_id
 
 
@@ -41,7 +54,7 @@ def main() -> None:
         f"RA={ra_deg:.6f}, Dec={dec_deg:.6f}"
     )
 
-    get_sx_spectrum(
+    get_supplemented_sx_spectrum(
         ra_deg=ra_deg,
         dec_deg=dec_deg,
         star_id=star_id,

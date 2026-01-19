@@ -175,6 +175,7 @@ def plot_spectrum(
 
     if out_path is not None:
         fig.savefig(out_path, dpi=300)
+        print(f"Wrote phase spectrum plot to {out_path}")
     if show:
         plt.show()
 
@@ -273,6 +274,7 @@ def animate_phase_spectrum(
 
     if out_path is not None:
         anim.save(out_path, dpi=300, writer=animation.FFMpegWriter(fps=2))
+        print(f"Wrote phase spectrum animation to {out_path}")
     if show:
         plt.show()
 
