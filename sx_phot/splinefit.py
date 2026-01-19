@@ -414,7 +414,8 @@ def fit_spherex_spectrum_bspline(
         bandwidth_um: Channel bandwidths (microns), one per channel.
         flux_jy: Fluxes (Jy).
         flux_err_jy: Flux errors (Jy).
-        masked: Optional boolean mask; True means exclude from fitting.
+        masked: Optional boolean mask; True means exclude from fitting. Points
+            with flux_jy - flux_err_jy < 0 are also excluded.
         n_res_el: Number of resolution elements per knot interval.
         degree: Spline degree.
         spacing_mode: 'log' for uniform in ln(lambda), 'linear' for uniform in
@@ -449,12 +450,14 @@ def fit_spherex_spectrum_bspline(
     else:
         masked = np.asarray(masked, dtype=bool)
 
+    detect_mask = (flux_jy - flux_err_jy) >= 0
     eligible = (
         np.isfinite(wavelength_um)
         & np.isfinite(bandwidth_um)
         & np.isfinite(flux_jy)
         & np.isfinite(flux_err_jy)
         & (flux_err_jy > 0)
+        & detect_mask
         & (~masked)
     )
 
