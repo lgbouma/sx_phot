@@ -7,7 +7,7 @@ set -euo pipefail
 
 # === CONFIG ===
 BUCKET="nasa-irsa-spherex"
-PREFIX="qr/level2/"                   # trailing slash
+PREFIX="qr2/level2/"                   # trailing slash
 DEST="/ar0/SPHEREX/spherex_l2"
 NUMWORKERS=96
 AWS_CLI="${AWS_CLI:-aws}"             # override via env if desired
