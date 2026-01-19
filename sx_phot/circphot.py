@@ -43,6 +43,7 @@ from astropy.io import fits
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 import numpy as np
+from astropy.nddata import Cutout2D
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import pandas as pd
@@ -126,6 +127,38 @@ def _pick_cutout_index(
     diffs = np.full_like(wavelength_um, np.inf, dtype=float)
     diffs[finite] = np.abs(wavelength_um[finite] - target_wavelength_um)
     return int(np.argmin(diffs))
+
+
+def _center_cutout_for_display(
+    image: np.ndarray,
+    wcs: WCS,
+    skycoord: SkyCoord,
+    size_pix: int,
+) -> tuple[np.ndarray, WCS]:
+    """Return a cutout centered on the target position for display.
+
+    Args:
+        image: 2D image array.
+        wcs: WCS for the input image.
+        skycoord: Target sky coordinate.
+        size_pix: Cutout size in pixels (square).
+
+    Returns:
+        Tuple of (cutout image, cutout WCS).
+    """
+    size_pix = int(size_pix)
+    if size_pix <= 0:
+        raise ValueError("size_pix must be positive.")
+    xpix, ypix = wcs.world_to_pixel(skycoord)
+    cutout = Cutout2D(
+        image,
+        (xpix, ypix),
+        (size_pix, size_pix),
+        wcs=wcs,
+        mode="partial",
+        fill_value=np.nan,
+    )
+    return np.asarray(cutout.data), cutout.wcs
 
 
 def _coerce_mask(mask: Optional[np.ndarray], n_points: int) -> np.ndarray:
@@ -756,6 +789,19 @@ def get_sx_spectrum(
                                 pass
                 if cutout_img is not None and cutout_source_path is not None:
                     log(f"Cutout FITS source: {cutout_source_path}")
+                if cutout_img is not None and cutout_wcs is not None:
+                    try:
+                        cutout_img, cutout_wcs = _center_cutout_for_display(
+                            cutout_img,
+                            cutout_wcs,
+                            skycoord,
+                            size_pix,
+                        )
+                    except Exception as e:
+                        log(
+                            "⚠️ Failed to center cutout for display: "
+                            f"{e}"
+                        )
                 if cutout_wcs is not None:
                     try:
                         sc = SkyCoord(
@@ -764,9 +810,7 @@ def get_sx_spectrum(
                             unit="deg",
                             frame="icrs",
                         )
-                        xpix, ypix = WCS(
-                            cutout_wcs.to_header()
-                        ).world_to_pixel(sc)
+                        xpix, ypix = cutout_wcs.world_to_pixel(sc)
                         log(
                             "Cutout aperture center (x, y) = "
                             f"({xpix:.2f}, {ypix:.2f})"
@@ -821,6 +865,7 @@ def get_sx_spectrum(
                     ra_deg,
                     dec_deg,
                     APERTURE_RADIUS,
+                    show_offsets=False,
                 )
             fig.tight_layout()
             savpath = outdir / f"result_{staridstr}{radecstr}{_a}.png"
@@ -922,6 +967,7 @@ def get_sx_spectrum(
                     ra_deg,
                     dec_deg,
                     APERTURE_RADIUS,
+                    show_offsets=False,
                 )
             fig2.tight_layout()
             savpath2 = outdir / f"{staridstr}{radecstr}{_a}_mjdc.png"

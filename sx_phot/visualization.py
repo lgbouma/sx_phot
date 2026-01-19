@@ -66,6 +66,8 @@ def _add_cutout_inset(
     ra_deg_pt: float,
     dec_deg_pt: float,
     ap_radius_pix: float,
+    *,
+    show_offsets: bool = False,
 ) -> None:
     """Add a small cutout inset with the aperture overlay to a host axis.
 
@@ -78,6 +80,7 @@ def _add_cutout_inset(
         ra_deg_pt: RA in degrees for the aperture center.
         dec_deg_pt: Dec in degrees for the aperture center.
         ap_radius_pix: Aperture radius in pixels.
+        show_offsets: If True, annotate dx/dy offsets from the inset center.
     """
     if image is None:
         return
@@ -96,8 +99,8 @@ def _add_cutout_inset(
         # Inset occupying ~20% of the axis in the upper-right.
         ax_in = inset_axes(
             host_ax,
-            width="20%",
-            height="20%",
+            width="30%",
+            height="30%",
             loc="upper right",
             borderpad=0.6,
         )
@@ -111,24 +114,24 @@ def _add_cutout_inset(
         ax_in.set_xticks([])
         ax_in.set_yticks([])
 
+        label_box = dict(
+            facecolor="k",
+            alpha=0.35,
+            pad=1,
+            edgecolor="none",
+        )
         # Label with wavelength.
         if wavelength_um is not None and np.isfinite(wavelength_um):
-            bbox = dict(
-                facecolor="k",
-                alpha=0.35,
-                pad=1,
-                edgecolor="none",
-            )
             ax_in.text(
                 0.03,
                 0.97,
-                f"λ={wavelength_um:.2f}µm",
+                f"λ={wavelength_um:.2f}μm",
                 ha="left",
                 va="top",
                 transform=ax_in.transAxes,
                 color="w",
-                fontsize=6,
-                bbox=bbox,
+                fontsize=8,
+                bbox=label_box,
             )
 
         # Overlay the circular aperture at the target position
@@ -141,15 +144,32 @@ def _add_cutout_inset(
                     unit="deg",
                     frame="icrs",
                 )
-                xpix, ypix = WCS(wcs_for_image.to_header()).world_to_pixel(sc)
+                xpix, ypix = wcs_for_image.world_to_pixel(sc)
                 circ = Circle(
                     (xpix, ypix),
                     radius=float(ap_radius_pix),
                     fill=False,
-                    linewidth=0.2,
+                    linewidth=0.6,
                     edgecolor="gray",
                 )
                 ax_in.add_patch(circ)
+                if show_offsets:
+                    ny, nx = data.shape
+                    x_center = 0.5 * (nx - 1)
+                    y_center = 0.5 * (ny - 1)
+                    dx = float(xpix - x_center)
+                    dy = float(ypix - y_center)
+                    ax_in.text(
+                        0.03,
+                        0.03,
+                        f"dx={dx:+.2f}, dy={dy:+.2f} pix",
+                        ha="left",
+                        va="bottom",
+                        transform=ax_in.transAxes,
+                        color="w",
+                        fontsize=7,
+                        bbox=label_box,
+                    )
         except Exception:
             pass
     except Exception:
