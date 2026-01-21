@@ -296,6 +296,22 @@ def plot_phase_bin_band_residuals(
         else:
             title = band_name
 
+        binned_centers = None
+        binned_medians = None
+        binned_errs = None
+        offset = 0.0
+        if np.any(res_valid_band):
+            phase_used = phase[res_valid_band]
+            norm_used = norm[res_valid_band]
+            binned_centers, binned_medians, binned_errs = _bin_phase_median(
+                phase_used,
+                norm_used,
+                n_bins,
+            )
+            finite_bins = np.isfinite(binned_medians)
+            if np.any(finite_bins):
+                offset = float(np.nanmedian(binned_medians[finite_bins]))
+
         _apply_plot_style()
         fig, ax = plt.subplots(figsize=(5, 5))
 
@@ -349,7 +365,10 @@ def plot_phase_bin_band_residuals(
                     coeffs[0] * np.sin(2.0 * np.pi * phase_grid)
                     + coeffs[1] * np.cos(2.0 * np.pi * phase_grid)
                 )
-                phase_plot, model_plot = phase_magseries(phase_grid, model)
+                phase_plot, model_plot = phase_magseries(
+                    phase_grid,
+                    model - offset,
+                )
                 ax.plot(
                     phase_plot,
                     model_plot,
@@ -363,7 +382,7 @@ def plot_phase_bin_band_residuals(
         if np.any(res_masked_band):
             phase_masked, norm_masked = phase_magseries(
                 phase[res_masked_band],
-                norm[res_masked_band],
+                norm[res_masked_band] - offset,
             )
             ax.scatter(
                 phase_masked,
@@ -372,7 +391,7 @@ def plot_phase_bin_band_residuals(
                 color="black",
                 s=36,
                 linewidths=0.7,
-                alpha=0.5,
+                alpha=0.35,
                 zorder=1,
             )
             ax.scatter(
@@ -382,7 +401,7 @@ def plot_phase_bin_band_residuals(
                 color="r",
                 s=25,
                 linewidths=0.6,
-                alpha=0.5,
+                alpha=0.35,
                 zorder=2,
                 label="masked",
             )
@@ -390,7 +409,7 @@ def plot_phase_bin_band_residuals(
         if np.any(res_clipped_band):
             phase_clipped, norm_clipped = phase_magseries(
                 phase[res_clipped_band],
-                norm[res_clipped_band],
+                norm[res_clipped_band] - offset,
             )
             ax.scatter(
                 phase_clipped,
@@ -400,7 +419,7 @@ def plot_phase_bin_band_residuals(
                 marker="o",
                 s=36,
                 linewidths=0.6,
-                alpha=0.5,
+                alpha=0.35,
                 zorder=2,
             )
             ax.scatter(
@@ -411,7 +430,7 @@ def plot_phase_bin_band_residuals(
                 marker="o",
                 s=32,
                 linewidths=0.6,
-                alpha=0.5,
+                alpha=0.35,
                 zorder=3,
                 label="clipped",
             )
@@ -420,7 +439,7 @@ def plot_phase_bin_band_residuals(
         if np.any(res_valid_band):
             phase_valid, norm_valid, err_valid = phase_magseries(
                 phase[res_valid_band],
-                norm[res_valid_band],
+                norm[res_valid_band] - offset,
                 norm_err[res_valid_band],
             )
             ax.errorbar(
@@ -438,7 +457,7 @@ def plot_phase_bin_band_residuals(
             if np.any(finite_lam):
                 phase_used, norm_used, lam_used = phase_magseries(
                     phase[finite_lam],
-                    norm[finite_lam],
+                    norm[finite_lam] - offset,
                     lam[finite_lam],
                 )
                 sc_used = ax.scatter(
@@ -450,14 +469,14 @@ def plot_phase_bin_band_residuals(
                     s=20,
                     edgecolors="black",
                     linewidths=0.3,
-                    alpha=0.5,
+                    alpha=0.35,
                     zorder=3,
                     label="used",
                 )
             else:
                 phase_used, norm_used = phase_magseries(
                     phase[res_valid_band],
-                    norm[res_valid_band],
+                    norm[res_valid_band] - offset,
                 )
                 sc_used = ax.scatter(
                     phase_used,
@@ -466,25 +485,18 @@ def plot_phase_bin_band_residuals(
                     s=20,
                     edgecolors="black",
                     linewidths=0.3,
-                    alpha=0.5,
+                    alpha=0.35,
                     zorder=3,
                     label="used",
                 )
 
-        if np.any(res_valid_band):
-            phase_used = phase[res_valid_band]
-            norm_used = norm[res_valid_band]
-            centers, medians, errs = _bin_phase_median(
-                phase_used,
-                norm_used,
-                n_bins,
-            )
-            good_bins = np.isfinite(medians) & np.isfinite(errs)
+        if binned_centers is not None:
+            good_bins = np.isfinite(binned_medians) & np.isfinite(binned_errs)
             if np.any(good_bins):
                 centers_plot, medians_plot, errs_plot = phase_magseries(
-                    centers[good_bins],
-                    medians[good_bins],
-                    errs[good_bins],
+                    binned_centers[good_bins],
+                    binned_medians[good_bins] - offset,
+                    binned_errs[good_bins],
                 )
                 ax.errorbar(
                     centers_plot,
@@ -523,8 +535,9 @@ def plot_phase_bin_band_residuals(
         ax.axhline(0.0, color="0.5", linewidth=0.8, zorder=0)
         ax.set_yscale("linear")
         ax.set_xlim(-0.7, 0.7)
+        ax.set_xticks([-0.5, 0.0, 0.5])
         ax.set_xlabel("Phase")
-        ax.set_ylabel("(Flux - Spline) / Spline")
+        ax.set_ylabel("(Flux - Spline) / Spline minus median")
         ax.grid(True, which="both", linestyle="--", alpha=0.5)
 
         ax.set_title(title)
@@ -544,7 +557,7 @@ def plot_phase_bin_band_residuals(
 
         handles, labels = ax.get_legend_handles_labels()
         if handles:
-            ax.legend(loc="best", fontsize=8)
+            ax.legend(loc="lower left", fontsize=8)
 
         if sc_used is not None and sc_used.get_array() is not None:
             cbar = fig.colorbar(sc_used, ax=ax, label="Wavelength (um)")
