@@ -25,6 +25,7 @@ Background methods
 Outputs
 - result_<radec>.png in the current directory.
 - sxphot_cache_<radec>.csv in the current directory.
+- sxphot_url_cache_<radec>.csv for cached datalink URL resolution.
 - sxphot_cache_<radec>_splsupp.csv for supplemented spline diagnostics.
 
 Notes
@@ -53,7 +54,7 @@ from urllib.request import urlretrieve
 from urllib.error import URLError, HTTPError
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 from collections import Counter
 
 from sx_phot.splinefit import fit_spherex_spectrum_bspline
@@ -207,6 +208,105 @@ def _format_radec_stub(ra_deg: float, dec_deg: float, decimals: int = 8) -> str:
     ra_str = f"{ra_deg:.{decimals}f}".replace(".", "p")
     dec_str = f"{dec_deg:.{decimals}f}".replace(".", "p")
     return f"ra{ra_str}_dec{dec_str}"
+
+
+def _coerce_cached_url(value: object) -> Optional[str]:
+    """Coerce a cached URL value to a usable string.
+
+    Args:
+        value: Cached value from a CSV cell.
+
+    Returns:
+        URL string if valid; otherwise None.
+    """
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "<na>"}:
+        return None
+    return text
+
+
+def _get_download_url(datalink_url: str) -> str:
+    """Resolve a datalink URL to the primary spectral image URL.
+
+    Args:
+        datalink_url: Datalink URL from the TAP results.
+
+    Returns:
+        URL for the spectral image file.
+    """
+    datalink_content = DatalinkResults.from_result_url(datalink_url)
+    return next(datalink_content.bysemantics("#this")).access_url
+
+
+def _get_download_urls_multithreaded(
+    urls: Sequence[str],
+    max_workers_local: int = 8,
+) -> list[Optional[str]]:
+    """Resolve datalink URLs in parallel.
+
+    Args:
+        urls: Sequence of datalink URLs to resolve.
+        max_workers_local: Number of threads to use.
+
+    Returns:
+        List of resolved URLs in the same order as ``urls``.
+    """
+    if not urls:
+        return []
+    max_workers_local = int(max(1, max_workers_local))
+    resolved: list[Optional[str]] = [None] * len(urls)
+
+    log(
+        f"Resolving {len(urls)} datalink URLs with "
+        f"{max_workers_local} threads..."
+    )
+
+    def _worker(idx_url: tuple[int, str]) -> tuple[int, Optional[str]]:
+        idx, url = idx_url
+        try:
+            return idx, _get_download_url(url)
+        except Exception as e:
+            log(f"Failed to resolve datalink URL at index {idx}: {e}")
+            return idx, None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    with ThreadPoolExecutor(max_workers=max_workers_local) as ex:
+        futures = {ex.submit(_worker, (i, u)): i for i, u in enumerate(urls)}
+        for fut in as_completed(futures):
+            idx, result = fut.result()
+            resolved[idx] = result
+
+    n_ok = sum(1 for r in resolved if r)
+    n_bad = len(resolved) - n_ok
+    log(f"Resolved {n_ok} OK, {n_bad} failed.")
+    return resolved
+
+
+def _parse_subdir_from_fname(fname: str, root: Path) -> Optional[Path]:
+    """Parse the local subdirectory for a SPHEREx L2 filename.
+
+    Args:
+        fname: FITS filename to parse.
+        root: Base cache root directory.
+
+    Returns:
+        Subdirectory path or None if parsing fails.
+    """
+    stem = Path(fname).stem
+    parts = stem.split('_')
+    # Expected: [level2, 2025W27, 1A, 0253, 1D3, spx, l2b-v13-YYYY-DDD]
+    if len(parts) < 7 or parts[0].lower() != 'level2':
+        return None
+    week = parts[1]
+    cam = parts[2]
+    det_field = parts[4]  # e.g., 1D3
+    l2b = parts[6]
+    m = re.search(r'D(\d+)$', det_field)
+    detnum = m.group(1) if m else det_field
+    return root / f"{week}_{cam}" / l2b / detnum
 
 
 from astropy import units as u  # noqa: F401
@@ -397,53 +497,63 @@ def get_sx_spectrum(
 
     # Collect datalink URLs
     datalink_urls = [results['access_url'][i] for i in range(len(results))]
+    url_cache_csv = outdir / f"sxphot_url_cache_{staridstr}{radecstr}.csv"
+    url_cache_map: dict[str, Optional[str]] = {}
 
-    def get_download_url(datalink_url: str) -> str:
-        datalink_content = DatalinkResults.from_result_url(datalink_url)
-        irsa_spectral_image_url = (
-            next(datalink_content.bysemantics("#this")).access_url
-        )
-        return irsa_spectral_image_url
+    if url_cache_csv.exists():
+        try:
+            url_cache_df = pd.read_csv(url_cache_csv)
+            required = {"datalink_url", "download_url"}
+            if required.issubset(url_cache_df.columns):
+                for row in url_cache_df.itertuples(index=False):
+                    datalink_url = _coerce_cached_url(
+                        getattr(row, "datalink_url", None)
+                    )
+                    download_url = _coerce_cached_url(
+                        getattr(row, "download_url", None)
+                    )
+                    if datalink_url:
+                        url_cache_map[datalink_url] = download_url
+                log(
+                    f"Loaded {len(url_cache_map)} cached datalink URLs "
+                    f"from {url_cache_csv}"
+                )
+            else:
+                log(
+                    f"⚠️ URL cache {url_cache_csv} missing columns "
+                    f"{sorted(required)}; ignoring."
+                )
+        except Exception as e:
+            log(f"⚠️ Failed to read URL cache {url_cache_csv}: {e}.")
 
-    # Resolve datalink URLs in parallel
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def get_download_urls_multithreaded(urls, max_workers_local: int = 8):
-        if not urls:
-            return []
-        max_workers_local = int(max(1, max_workers_local))
-        resolved = [None] * len(urls)
-
+    download_urls = [url_cache_map.get(url) for url in datalink_urls]
+    missing_idx = [i for i, url in enumerate(download_urls) if not url]
+    if missing_idx:
+        missing_urls = [datalink_urls[i] for i in missing_idx]
         log(
-            f"Resolving {len(urls)} datalink URLs with "
-            f"{max_workers_local} threads..."
+            f"{len(missing_urls)} datalink URLs missing from cache; "
+            "resolving."
         )
+        resolved = _get_download_urls_multithreaded(
+            missing_urls,
+            max_workers_local=max_workers,
+        )
+        for idx, resolved_url in zip(missing_idx, resolved):
+            download_urls[idx] = resolved_url
+            if resolved_url:
+                url_cache_map[datalink_urls[idx]] = resolved_url
 
-        def _worker(idx_url):
-            idx, url = idx_url
+        if save_csv:
             try:
-                return idx, get_download_url(url)
+                pd.DataFrame(
+                    {
+                        "datalink_url": datalink_urls,
+                        "download_url": download_urls,
+                    }
+                ).to_csv(url_cache_csv, index=False)
+                log(f"Saved URL cache CSV: {url_cache_csv}")
             except Exception as e:
-                log(f"Failed to resolve datalink URL at index {idx}: {e}")
-                return idx, None
-
-        with ThreadPoolExecutor(max_workers=max_workers_local) as ex:
-            futures = {
-                ex.submit(_worker, (i, u)): i for i, u in enumerate(urls)
-            }
-            for fut in as_completed(futures):
-                idx, result = fut.result()
-                resolved[idx] = result
-
-        n_ok = sum(1 for r in resolved if r)
-        n_bad = len(resolved) - n_ok
-        log(f"Resolved {n_ok} OK, {n_bad} failed.")
-        return resolved
-
-    download_urls = get_download_urls_multithreaded(
-        datalink_urls,
-        max_workers_local=max_workers,
-    )
+                log(f"⚠️ Failed to save URL cache CSV {url_cache_csv}: {e}")
     irsa_spectral_image_urls = [u for u in download_urls if u]
     # Map FITS basename -> IRSA spectral image URL for later cutout retrieval
     basename_to_irsa_url = {Path(u).name: u for u in irsa_spectral_image_urls}
@@ -484,23 +594,8 @@ def get_sx_spectrum(
             else:
                 cache_root = Path.home() / "local" / "SPHEREX" / "spherex_l2"
 
-                def parse_subdir_from_fname(fname: str, root: Path):
-                    stem = Path(fname).stem
-                    parts = stem.split('_')
-                    # Expected: [level2, 2025W27, 1A, 0253, 1D3, spx,
-                    # l2b-v13-YYYY-DDD]
-                    if len(parts) < 7 or parts[0].lower() != 'level2':
-                        return None
-                    week = parts[1]
-                    cam = parts[2]
-                    det_field = parts[4]  # e.g., 1D3
-                    l2b = parts[6]
-                    m = re.search(r'D(\d+)$', det_field)
-                    detnum = m.group(1) if m else det_field
-                    return root / f"{week}_{cam}" / l2b / detnum
-
                 subdir = (
-                    parse_subdir_from_fname(local_fname, cache_root)
+                    _parse_subdir_from_fname(local_fname, cache_root)
                     or cache_root
                 )
                 download_url = aws_spectral_image_url
