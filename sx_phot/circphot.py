@@ -193,6 +193,22 @@ def _coerce_mask(mask: Optional[np.ndarray], n_points: int) -> np.ndarray:
     return np.isin(text, ["1", "true", "t", "yes", "y"])
 
 
+def _format_radec_stub(ra_deg: float, dec_deg: float, decimals: int = 8) -> str:
+    """Format RA/Dec into a filename-safe stub.
+
+    Args:
+        ra_deg: Right ascension in degrees.
+        dec_deg: Declination in degrees.
+        decimals: Decimal places for rounding.
+
+    Returns:
+        Filename-safe stub in the form ``ra<ra>_dec<dec>``.
+    """
+    ra_str = f"{ra_deg:.{decimals}f}".replace(".", "p")
+    dec_str = f"{dec_deg:.{decimals}f}".replace(".", "p")
+    return f"ra{ra_str}_dec{dec_str}"
+
+
 from astropy import units as u  # noqa: F401
 from photutils.aperture import (
     CircularAperture,
@@ -307,9 +323,7 @@ def get_sx_spectrum(
         pandas.DataFrame: Per-image photometry records (may be empty).
     """
     # CSV cache of processed photometry records
-    ra_str = str(ra_deg).replace(".", "p")
-    dec_str = str(dec_deg).replace(".", "p")
-    radecstr = f"ra{ra_str}_{dec_str}"
+    radecstr = _format_radec_stub(ra_deg, dec_deg)
     _a = f"_{bkgd_method}"
     staridstr = "" if star_id in (None, "") else f"{star_id}_"
     outdir = Path(output_dir)
@@ -1065,9 +1079,7 @@ def get_supplemented_sx_spectrum(
     Raises:
         ValueError: If required columns are missing from the base spectrum.
     """
-    ra_str = str(ra_deg).replace(".", "p")
-    dec_str = str(dec_deg).replace(".", "p")
-    radecstr = f"ra{ra_str}_{dec_str}"
+    radecstr = _format_radec_stub(ra_deg, dec_deg)
     _a = f"_{bkgd_method}"
     staridstr = "" if star_id in (None, "") else f"{star_id}_"
     outdir = Path(output_dir)
