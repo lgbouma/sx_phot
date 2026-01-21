@@ -1,10 +1,8 @@
 """Run SPHEREx aperture photometry for a TIC target using mean coordinates.
 
 Usage:
-    /Users/luke/local/miniconda3/envs/py311_sx/bin/python \
-        drivers/run_tic_circphot.py TIC_300651846
-    /Users/luke/local/miniconda3/envs/py311_sx/bin/python \
-        drivers/run_tic_circphot.py 300651846
+    (py311_sx) python run_tic_circphot.py TIC_300651846
+    (py311_sx) python run_tic_circphot.py 300651846
 
 API:
     - normalize_tic_id(tic_id) coerces TIC identifiers to integers.
@@ -16,6 +14,7 @@ API:
 from __future__ import annotations
 
 import argparse
+import socket
 
 from get_tic_spherex_coords import get_mean_spherex_coords
 from sx_phot.circphot import get_supplemented_sx_spectrum
@@ -23,6 +22,7 @@ from sx_phot.tic_motion import normalize_tic_id
 
 
 DEFAULT_TIC_ID = "TIC_300651846"
+USE_CUTOUT = True if socket.gethostname() != 'wh3' else False
 
 
 def _parse_args() -> argparse.Namespace:
@@ -59,7 +59,7 @@ def main() -> None:
         dec_deg=dec_deg,
         star_id=star_id,
         output_dir="test_results",
-        use_cutout=True,
+        use_cutout=USE_CUTOUT,
     )
 
 
