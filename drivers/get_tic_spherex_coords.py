@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+import socket
 
 import pandas as pd
 
@@ -23,6 +25,13 @@ from sx_phot.tic_motion import (
     query_spherex_obscore,
     standardize_tic_row,
 )
+
+def _default_tic8_lookup_path() -> Path:
+    """Return the local TIC8 lookup catalog path for this host."""
+    host = socket.gethostname()
+    if host in {"wh1", "wh2", "wh3"}:
+        return Path("/ar0/local/TARS/tic8_plxGT2_TmagLT17_lukebouma.csv")
+    return Path("/Users/luke/local/TARS/tic8_plxGT2_TmagLT17_lukebouma.csv")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -78,6 +87,37 @@ def _save_summary(df: pd.DataFrame, path: Path) -> None:
     path.write_text("\n".join(f"{k}: {v}" for k, v in summary.items()))
 
 
+def _lookup_gaia_source_id(
+    tic_id: int,
+    local_path: Optional[Path] = None,
+) -> Optional[int]:
+    """Look up a Gaia DR2 source id for a TIC ID via a local catalog.
+
+    Args:
+        tic_id: TIC identifier as an integer.
+        local_path: Path to the local TIC8 lookup CSV.
+
+    Returns:
+        Gaia DR2 source id if found, otherwise None.
+    """
+    local_path = local_path or _default_tic8_lookup_path()
+    if not local_path.exists():
+        return None
+
+    usecols = ["ID", "GAIA"]
+    for chunk in pd.read_csv(local_path, usecols=usecols, chunksize=200_000):
+        ids = pd.to_numeric(chunk["ID"], errors="coerce")
+        matches = ids == int(tic_id)
+        if not matches.any():
+            continue
+        gaia_val = chunk.loc[matches, "GAIA"].iloc[0]
+        try:
+            return int(gaia_val)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _load_spherex_coords_dataframe(
     tic_id: str | int,
     results_dir: str,
@@ -106,13 +146,14 @@ def _load_spherex_coords_dataframe(
     out_cache = cache_dir / f"spherex_coords_{tic_label}.csv"
     summary_path = cache_dir / f"spherex_coords_{tic_label}_summary.txt"
 
-    tic_df = load_or_query_csv(
-        tic_cache,
-        lambda: standardize_tic_row(get_tic8_row(tic_id, cache_dir)),
-        overwrite=overwrite,
-    )
-
-    gaia_source_id = int(tic_df.loc[0, "gaia_dr2_source_id"])
+    gaia_source_id = _lookup_gaia_source_id(tic_id)
+    if gaia_source_id is None:
+        tic_df = load_or_query_csv(
+            tic_cache,
+            lambda: standardize_tic_row(get_tic8_row(tic_id, cache_dir)),
+            overwrite=overwrite,
+        )
+        gaia_source_id = int(tic_df.loc[0, "gaia_dr2_source_id"])
     gaia_df = load_or_query_csv(
         gaia_cache,
         lambda: query_gaia_dr2_astrometry(gaia_source_id),
