@@ -25,6 +25,7 @@ from sx_phot.tic_motion import normalize_tic_id
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_CSV = (
     ROOT
+    / "sx_phot"
     / "data"
     / "targetlists"
     / "jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
@@ -268,7 +269,7 @@ def main() -> None:
             star_id = f"TIC_{tic_id}"
             target_dir = output_root / star_id
             target_dir.mkdir(parents=True, exist_ok=True)
-            log_path = target_dir / "run.log"
+            log_path = target_dir / f"run_{star_id}.log"
 
             if args.skip_existing and _should_skip(target_dir):
                 _log(f"{star_id}: skipping existing outputs")
