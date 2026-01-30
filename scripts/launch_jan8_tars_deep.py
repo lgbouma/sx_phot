@@ -3,6 +3,10 @@
 
 This launcher throttles to a max concurrency, sleeps between submissions,
 and writes per-target logs plus a summary CSV.
+
+Run on wh3 via:
+
+(py311_sx) python -u launch_jan8_tars_deep.py --max-parallel 10 --launch-delay 300 &> jan8_deep_v0.log &
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ DEFAULT_INPUT_CSV = (
     / "sx_phot"
     / "data"
     / "targetlists"
-    / "jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
+    / "jan8_default_catalog_no_quality_flags_spherex_obs_deep_TmagGt11_Plt5_south.csv"
 )
 DEFAULT_OUTPUT_ROOT = ROOT / "results" / "jan8_tars_deep"
 DEFAULT_RUNNER = ROOT / "scripts" / "run_ticid_with_period.py"
