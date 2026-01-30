@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import socket
+from pathlib import Path
 
 from get_tic_spherex_coords import get_mean_spherex_coords
 from sx_phot.circphot import get_supplemented_sx_spectrum
@@ -39,6 +40,11 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_TIC_ID,
         help="TIC identifier, e.g. TIC_300651846 or 300651846.",
     )
+    parser.add_argument(
+        "--output-dir",
+        default="test_results",
+        help="Directory for photometry outputs (default: test_results).",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +54,8 @@ def main() -> None:
     tic_id = normalize_tic_id(args.tic_id)
     ra_deg, dec_deg = get_mean_spherex_coords(tic_id)
     star_id = f"TIC_{tic_id}"
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(
         f"Using mean coordinates for {star_id}: "
@@ -58,7 +66,7 @@ def main() -> None:
         ra_deg=ra_deg,
         dec_deg=dec_deg,
         star_id=star_id,
-        output_dir="test_results",
+        output_dir=str(output_dir),
         use_cutout=USE_CUTOUT,
     )
 
