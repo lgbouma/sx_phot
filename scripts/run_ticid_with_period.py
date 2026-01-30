@@ -22,7 +22,7 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
-from sx_phot.circphot import get_supplemented_sx_spectrum
+from sx_phot.mp_circphot import get_supplemented_sx_spectrum
 from sx_phot.splinefit import fit_spherex_spectrum_bspline
 from sx_phot.tic_motion import normalize_tic_id
 from sx_phot.visualization import plot_spectrum_with_spline
@@ -221,6 +221,14 @@ def _parse_args() -> argparse.Namespace:
         choices=["zodi", "annulus"],
         help="Background subtraction method (default: annulus).",
     )
+    parser.add_argument(
+        "--photometry-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of processes for photometry (default: half the CPUs)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -285,6 +293,7 @@ def main() -> int:
             dec_deg=dec_deg,
             do_photometry=args.do_photometry,
             bkgd_method=args.bkgd_method,
+            photometry_workers=args.photometry_workers,
             output_dir=target_dir,
             star_id=star_id,
             save_plot=True,

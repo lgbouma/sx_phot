@@ -105,6 +105,14 @@ def _parse_args() -> argparse.Namespace:
         help="Force recomputation of photometry even if caches exist.",
     )
     parser.add_argument(
+        "--photometry-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of processes for photometry (default: half the CPUs)."
+        ),
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="Skip targets with a done marker or cached supplemented CSV.",
@@ -164,6 +172,7 @@ def _launch_job(
     output_root: Path,
     ylim: Optional[str],
     do_photometry: bool,
+    photometry_workers: Optional[int],
     log_path: Path,
 ) -> tuple[subprocess.Popen, TextIO]:
     """Launch a single target job and return the process and log handle."""
@@ -181,6 +190,8 @@ def _launch_job(
         cmd.extend(["--ylim", ylim])
     if do_photometry:
         cmd.append("--do-photometry")
+    if photometry_workers is not None:
+        cmd.extend(["--photometry-workers", str(photometry_workers)])
     cmd.append("--skip-existing")
 
     log_handle = log_path.open("a", encoding="utf-8")
@@ -300,6 +311,7 @@ def main() -> None:
                 output_root,
                 args.ylim,
                 args.do_photometry,
+                args.photometry_workers,
                 log_path,
             )
             running.append(
