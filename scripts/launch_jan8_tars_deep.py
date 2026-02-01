@@ -225,6 +225,7 @@ def main() -> None:
     _init_summary(summary_path)
 
     df = pd.read_csv(input_csv)
+    df = df.sample(frac=1)
     required = {"TICID", "adopted_period"}
     missing = sorted(col for col in required if col not in df.columns)
     if missing:
