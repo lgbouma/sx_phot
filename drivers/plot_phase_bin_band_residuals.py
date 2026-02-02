@@ -7,12 +7,13 @@ measurements plus phase-binned medians with MAD-scaled error bars.
 
 Options:
     --csv PATH         Input supplemented cache CSV.
-    --t0_tjd FLOAT     Reference epoch in TJD.
+    --t0 FLOAT         Reference epoch in TJD.
     --period_days FLOAT
                        Period in days.
     --bins INT         Number of phase bins per period (default: 50).
     --ylim LOW,HIGH    Optional y-limits (use 'auto' or 'none' for defaults).
     --out PATH         Output directory or base PNG path; a band suffix is added.
+    --no-sine-fit      Disable the sinusoid fit overlay (enabled by default).
 """
 
 from __future__ import annotations
@@ -209,6 +210,7 @@ def plot_phase_bin_band_residuals(
     n_bins: int = 50,
     ylim: Optional[Tuple[float, float]] = None,
     out_arg: Optional[str] = None,
+    plot_sine_fit: bool = True,
 ) -> None:
     """Plot phase-folded residuals for each SPHEREx band.
 
@@ -219,6 +221,7 @@ def plot_phase_bin_band_residuals(
         n_bins: Number of phase bins per period.
         ylim: Optional y-axis limits for normalized residuals.
         out_arg: Output directory or base PNG path.
+        plot_sine_fit: Whether to overlay a sinusoid fit for the >1 um points.
 
     Raises:
         ValueError: If required columns are missing.
@@ -315,69 +318,72 @@ def plot_phase_bin_band_residuals(
         _apply_plot_style()
         fig, ax = plt.subplots(figsize=(5, 5))
 
-        fit_mask_band = (
-            res_valid_band
-            & np.isfinite(lam)
-            & (lam > 1.0)
-            & np.isfinite(norm_err)
-            & (norm_err > 0)
-        )
-        if np.count_nonzero(fit_mask_band) >= 2:
-            phase_fit = phase[fit_mask_band]
-            norm_fit = norm[fit_mask_band]
-            w = 1.0 / norm_err[fit_mask_band]
-            design = np.column_stack(
-                [
-                    np.sin(2.0 * np.pi * phase_fit),
-                    np.cos(2.0 * np.pi * phase_fit),
-                ]
+        if plot_sine_fit:
+            fit_mask_band = (
+                res_valid_band
+                & np.isfinite(lam)
+                & (lam > 1.0)
+                & np.isfinite(norm_err)
+                & (norm_err > 0)
             )
-            design_w = design * w[:, None]
-            norm_w = norm_fit * w
-            try:
-                coeffs, _, _, _ = np.linalg.lstsq(design_w, norm_w, rcond=None)
-            except np.linalg.LinAlgError:
-                coeffs = None
-            if coeffs is not None and coeffs.size == 2:
-                amp = float(np.hypot(coeffs[0], coeffs[1]))
-                phase0 = float(
-                    (np.arctan2(-coeffs[1], coeffs[0]) / (2.0 * np.pi)) % 1.0
+            if np.count_nonzero(fit_mask_band) >= 2:
+                phase_fit = phase[fit_mask_band]
+                norm_fit = norm[fit_mask_band]
+                w = 1.0 / norm_err[fit_mask_band]
+                design = np.column_stack(
+                    [
+                        np.sin(2.0 * np.pi * phase_fit),
+                        np.cos(2.0 * np.pi * phase_fit),
+                    ]
                 )
-                model_fit = (
-                    coeffs[0] * np.sin(2.0 * np.pi * phase_fit)
-                    + coeffs[1] * np.cos(2.0 * np.pi * phase_fit)
-                )
-                resid = norm_fit - model_fit
-                dof = max(norm_fit.size - 2, 0)
-                if dof > 0:
-                    red_chi2 = float(np.sum((resid / norm_err[fit_mask_band]) ** 2) / dof)
-                else:
-                    red_chi2 = float("nan")
-                print(
-                    f"{band_name} sine fit: "
-                    f"amp={amp:.6g}, "
-                    f"phase0={phase0:.6f}, "
-                    f"red_chi2={red_chi2:.3f}, "
-                    f"n_fit={norm_fit.size}"
-                )
-                phase_grid = np.linspace(0.0, 1.0, 512)
-                model = (
-                    coeffs[0] * np.sin(2.0 * np.pi * phase_grid)
-                    + coeffs[1] * np.cos(2.0 * np.pi * phase_grid)
-                )
-                phase_plot, model_plot = phase_magseries(
-                    phase_grid,
-                    model - offset,
-                )
-                ax.plot(
-                    phase_plot,
-                    model_plot,
-                    color="0.4",
-                    alpha=0.2,
-                    linewidth=2.0,
-                    zorder=0,
-                    label="sine (>1um)",
-                )
+                design_w = design * w[:, None]
+                norm_w = norm_fit * w
+                try:
+                    coeffs, _, _, _ = np.linalg.lstsq(design_w, norm_w, rcond=None)
+                except np.linalg.LinAlgError:
+                    coeffs = None
+                if coeffs is not None and coeffs.size == 2:
+                    amp = float(np.hypot(coeffs[0], coeffs[1]))
+                    phase0 = float(
+                        (np.arctan2(-coeffs[1], coeffs[0]) / (2.0 * np.pi)) % 1.0
+                    )
+                    model_fit = (
+                        coeffs[0] * np.sin(2.0 * np.pi * phase_fit)
+                        + coeffs[1] * np.cos(2.0 * np.pi * phase_fit)
+                    )
+                    resid = norm_fit - model_fit
+                    dof = max(norm_fit.size - 2, 0)
+                    if dof > 0:
+                        red_chi2 = float(
+                            np.sum((resid / norm_err[fit_mask_band]) ** 2) / dof
+                        )
+                    else:
+                        red_chi2 = float("nan")
+                    print(
+                        f"{band_name} sine fit: "
+                        f"amp={amp:.6g}, "
+                        f"phase0={phase0:.6f}, "
+                        f"red_chi2={red_chi2:.3f}, "
+                        f"n_fit={norm_fit.size}"
+                    )
+                    phase_grid = np.linspace(0.0, 1.0, 512)
+                    model = (
+                        coeffs[0] * np.sin(2.0 * np.pi * phase_grid)
+                        + coeffs[1] * np.cos(2.0 * np.pi * phase_grid)
+                    )
+                    phase_plot, model_plot = phase_magseries(
+                        phase_grid,
+                        model - offset,
+                    )
+                    ax.plot(
+                        phase_plot,
+                        model_plot,
+                        color="0.4",
+                        alpha=0.2,
+                        linewidth=2.0,
+                        zorder=0,
+                        label="sine (>1um)",
+                    )
 
         if np.any(res_masked_band):
             phase_masked, norm_masked = phase_magseries(
@@ -618,6 +624,13 @@ def main() -> None:
         type=str,
         help="Comma-separated y-limits, e.g. '1e-3,1e-1' (use 'auto' for default).",
     )
+    parser.add_argument(
+        "--no-sine-fit",
+        dest="plot_sine_fit",
+        action="store_false",
+        default=True,
+        help="Disable the sinusoid fit overlay.",
+    )
 
     args = parser.parse_args(_normalize_ylim_argv(sys.argv[1:]))
     ylim = _parse_ylim(args.ylim)
@@ -635,6 +648,7 @@ def main() -> None:
         n_bins=int(args.bins),
         ylim=ylim,
         out_arg=args.out,
+        plot_sine_fit=bool(args.plot_sine_fit),
     )
 
 
