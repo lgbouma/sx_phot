@@ -1,5 +1,5 @@
 #!/Users/luke/local/miniconda3/envs/py311_sx/bin/python
-"""Launch parallel jobs for the Jan 8 TARS deep-field catalog.
+"""Launch parallel jobs for a catalog with TIC IDs and periods.
 
 This launcher throttles to a max concurrency, sleeps between submissions,
 and writes per-target logs plus a summary CSV.
@@ -9,7 +9,13 @@ Run on mico via:
 input_csv = "/Users/luke/Dropbox/proj/sx_phot/sx_phot/data/targetlists/jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
 output_root = "/Users/luke/Dropbox/proj/sx_phot/results/jan8_tars_deep"
 
-(py311_sx) python -u launch_CSV_ticid_period.py --input-csv "${input_csv}" --output-root "${output_root}" --max-parallel 10 --launch-delay 300 &> jan8_deep_v0.log &
+(py311_sx) python -u launch_CSV_ticid_period.py \
+    --input-csv "${input_csv}" \
+    --output-root "${output_root}" \
+    --ticid-key TICID \
+    --period-key adopted_period \
+    --max-parallel 10 \
+    --launch-delay 300 &> jan8_deep_v0.log &
 """
 
 from __future__ import annotations
@@ -49,7 +55,7 @@ def _log(message: str) -> None:
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Launch parallel runs for the Jan 8 TARS deep-field list."
+        description="Launch parallel runs for a TIC-ID + period catalog."
     )
     parser.add_argument(
         "--input-csv",
@@ -88,6 +94,19 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional maximum number of targets to process.",
+    )
+    parser.add_argument(
+        "--ticid-key",
+        default="TICID",
+        help="Column name for TIC IDs in the input CSV.",
+    )
+    parser.add_argument(
+        "--period-key",
+        default="adopted_period",
+        help=(
+            "Column name for periods in the input CSV. If the key contains "
+            "'hr', values are interpreted as hours and converted to days."
+        ),
     )
     parser.add_argument(
         "--ylim",
@@ -221,7 +240,7 @@ def main() -> None:
 
     df = pd.read_csv(input_csv)
     df = df.sample(frac=1)
-    required = {"TICID", "adopted_period"}
+    required = {args.ticid_key, args.period_key}
     missing = sorted(col for col in required if col not in df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(missing)}")
@@ -241,14 +260,14 @@ def main() -> None:
             idx += 1
 
             try:
-                tic_id = normalize_tic_id(row["TICID"])
+                tic_id = normalize_tic_id(row[args.ticid_key])
             except Exception as exc:
                 _log(f"Skipping invalid TIC: {exc}")
                 _append_summary(
                     summary_path,
                     [
-                        str(row.get("TICID", "")),
-                        str(row.get("adopted_period", "")),
+                        str(row.get(args.ticid_key, "")),
+                        str(row.get(args.period_key, "")),
                         "invalid_tic",
                         "",
                         "",
@@ -259,7 +278,11 @@ def main() -> None:
                 )
                 continue
 
-            period_days = float(row["adopted_period"])
+            period_raw = float(row[args.period_key])
+            if "hr" in args.period_key.lower():
+                period_days = period_raw / 24.0
+            else:
+                period_days = period_raw
             if not np.isfinite(period_days) or period_days <= 0:
                 _log(f"TIC_{tic_id}: invalid period {period_days}")
                 _append_summary(
