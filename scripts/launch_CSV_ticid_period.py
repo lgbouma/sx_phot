@@ -4,19 +4,12 @@
 This launcher throttles to a max concurrency, sleeps between submissions,
 and writes per-target logs plus a summary CSV.
 
-Run on wh3 via:
+Run on mico via:
 
-input_csv = (
-    "/Users/luke/Dropbox/proj/sx_phot/sx_phot/data/targetlists/"
-    "jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
-)
+input_csv = "/Users/luke/Dropbox/proj/sx_phot/sx_phot/data/targetlists/jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
 output_root = "/Users/luke/Dropbox/proj/sx_phot/results/jan8_tars_deep"
 
-(py311_sx) python -u launch_CSV_ticid_period.py \
-    --input-csv "${input_csv}" \
-    --output-root "${output_root}" \
-    --max-parallel 10 \
-    --launch-delay 300 &> jan8_deep_v0.log &
+(py311_sx) python -u launch_CSV_ticid_period.py --input-csv "${input_csv}" --output-root "${output_root}" --max-parallel 10 --launch-delay 300 &> jan8_deep_v0.log &
 """
 
 from __future__ import annotations
