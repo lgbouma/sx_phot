@@ -6,7 +6,17 @@ and writes per-target logs plus a summary CSV.
 
 Run on wh3 via:
 
-(py311_sx) python -u launch_jan8_tars_deep.py --max-parallel 10 --launch-delay 300 &> jan8_deep_v0.log &
+input_csv = (
+    "/Users/luke/Dropbox/proj/sx_phot/sx_phot/data/targetlists/"
+    "jan8_default_catalog_no_quality_flags_spherex_obs_deep.csv"
+)
+output_root = "/Users/luke/Dropbox/proj/sx_phot/results/jan8_tars_deep"
+
+(py311_sx) python -u launch_CSV_ticid_period.py \
+    --input-csv "${input_csv}" \
+    --output-root "${output_root}" \
+    --max-parallel 10 \
+    --launch-delay 300 &> jan8_deep_v0.log &
 """
 
 from __future__ import annotations
@@ -27,14 +37,6 @@ from sx_phot.tic_motion import normalize_tic_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT_CSV = (
-    ROOT
-    / "sx_phot"
-    / "data"
-    / "targetlists"
-    / "jan8_default_catalog_no_quality_flags_spherex_obs_deep_TmagGt11_Plt5_south.csv"
-)
-DEFAULT_OUTPUT_ROOT = ROOT / "results" / "jan8_tars_deep"
 DEFAULT_RUNNER = ROOT / "scripts" / "run_ticid_with_period.py"
 DEFAULT_MAX_PARALLEL = 50
 DEFAULT_LAUNCH_DELAY = 10.0
@@ -58,12 +60,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input-csv",
-        default=str(DEFAULT_INPUT_CSV),
+        required=True,
         help="Input catalog CSV path.",
     )
     parser.add_argument(
         "--output-root",
-        default=str(DEFAULT_OUTPUT_ROOT),
+        required=True,
         help="Root output directory for per-TIC products.",
     )
     parser.add_argument(
