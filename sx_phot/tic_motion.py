@@ -17,6 +17,7 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 
 GAIA_TAP_URL = "https://gea.esac.esa.int/tap-server/tap"
+HEIDELBURG_TAP_URL = "https://gaia.ari.uni-heidelberg.de/tap"
 SPHEREX_TAP_URL = "https://irsa.ipac.caltech.edu/TAP"
 DEFAULT_GAIA_REF_EPOCH = 2015.5
 
@@ -236,7 +237,13 @@ def query_gaia_dr2_astrometry(source_id: int) -> pd.DataFrame:
         "FROM gaiadr2.gaia_source "
         f"WHERE source_id = {source_id}"
     )
-    results = service.search(query)
+    try:
+        results = service.search(query)
+    except pyvo.dal.exceptions.DALFormatError:
+        _log(f"Gaia archive search failed, trying Heidelberg...")
+        service = pyvo.dal.TAPService(HEIDELBURG_TAP_URL)
+        results = service.search(query)
+
     df = results.to_table().to_pandas()
     if df.empty:
         raise ValueError(f"No Gaia DR2 data found for source_id={source_id}.")
