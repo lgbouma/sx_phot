@@ -1,0 +1,58 @@
+TODO (authoritative roadmap; mirror finished items in DONE.txt)
+
+Bulk SPHEREx spectra: TARS (~1M stars) now, the ~7M-star d<500pc, T<16
+selection function next.  Code: sx_phot/image_index.py, bulk_phot.py,
+bulk_products.py; drivers/build_image_index.py, run_bulk_phot.py,
+gather_bulk_phot.py, materialize_bulk_star.py; scripts/run_bulk_phot_tars.sh.
+
+In flight
+  [ ] full TARS run in /ar0/SPHEREX/bulkphot/tars_v0 (relaunched
+      2026-11-02 16:19 after the band-edge background fix; ~1.5M files at
+      ~15 files/s, ~27 h).  When it ends the wrapper gathers by star.
+      Check pipeline_*.log / run_bulk_phot.log.
+  [ ] re-run scripts/run_bulk_phot_tars.sh once the qr3 download has
+      finished, to pick up files that were still downloading (and any
+      "too_recent" skips).  Consider a daily cron entry after the
+      03:00 image download (e.g. 09:00) so new weeks are photometered
+      automatically.
+
+Validation and products
+  [ ] QA plots: /ar0/SPHEREX/bulkphot/tars_v0/qa/{qa_load.py,qa_plot.py}
+      (copies of session scratch scripts) write <run-dir>/qa/{overview_
+      grid.png, <group>_TIC_*_spline.png, *_tjd.png, old_vs_new_TIC_*.png,
+      qa_summary.csv}; promote to drivers/plot_bulk_qa.py once the run
+      is done.
+  [ ] small flux steps at the D3/D4 (2.4 um) and D5/D6 (3.8 um) band
+      boundaries in the spline fits (few percent); check whether this is
+      the qr2 calibration or the aperture correction before using
+      cross-band colors.
+  [ ] unflagged outliers remain (single points 3-30x the continuum, e.g.
+      cosmic rays / unflagged artifacts); the spline clipping removes
+      them per star, but consider a per-image or per-row flag (e.g.
+      aperture max pixel vs neighbours) in bulk_phot.
+  [ ] the old per-star cache CSVs in drivers/test_results were made with
+      the empty-annulus bug; regenerate with do_photometry=True if they
+      are used as references at 1.0-1.1 um (test_bulk_phot compares the
+      first three rows only, which are unaffected).
+  [ ] compare ~10 random TARS stars end-to-end (materialize_bulk_star.py)
+      against the old per-star pipeline outputs in results/ (stride=1
+      matched to 1e-7; stride=8 is used in the run).
+  [ ] spline supplement + plots as a separate parallel pass over buckets
+      (per-star fit ~0.1 s; 1M PNGs is a ~3 h job, keep on demand).
+  [ ] per-star summary table (n_images, n_good, median S/N per band,
+      coverage window) built from the buckets.
+
+Known limitations
+  [ ] backfill (qr3 reprocessing of qr2 weeks): local files join to the
+      lowest-release ObsCore row; needs a rule once DOWNLOAD_BACKFILL=1
+      is used.  Never mix qr2 and qr3 rows in one time series.
+  [ ] the global star-mask statistics use a 1/8 pixel subsample
+      (stats_stride=8); no measurable effect on the validation stars.
+  [ ] ARCSEC_PER_PIXEL=6.1 (circphot) vs 6.15 in the ObsCore metadata;
+      1.6% flux-scale question inherited from circphot.
+
+Scale-up
+  [ ] 7M-star catalog: same pass, roughly double CPU per image, same I/O;
+      run as a separate run dir or a union catalog.
+  [ ] re-measure cold-read throughput with no download running; try
+      --no-zodi (about 20% less I/O) if the pass must be faster.

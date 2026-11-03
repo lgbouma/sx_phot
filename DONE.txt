@@ -1,0 +1,24 @@
+DONE (running history; see TODO.txt for the roadmap)
+
+2026-11-02  Bulk SPHEREx photometry for the TARS catalog: built
+  sx_phot/image_index.py (ObsCore snapshot + local store -> parquet index
+  with decodable image keys; polygon footprint query reproduces IRSA
+  CONTAINS exactly), sx_phot/bulk_phot.py (image-centric photometry,
+  reproduces circphot fluxes to float32 precision, sharded and
+  restartable), sx_phot/bulk_products.py (gather by star, legacy CSV
+  materialization with spline supplement), drivers and the
+  scripts/run_bulk_phot_tars.sh wrapper, pytest coverage (24 tests pass).
+  Measured 14.7 files/s on one shard (1713 files, 676k rows, 0 failures)
+  with the qr3 download running concurrently.  Launched the full TARS run
+  into /ar0/SPHEREX/bulkphot/tars_v0 (expected ~1 day, I/O bound).
+
+2026-11-02  QA plots of the first 35 shards (/ar0/SPHEREX/bulkphot/tars_v0/
+  qa_before_fix/) showed a spike at 1.07-1.10 um in most spectra: 28% of
+  rows there had an empty annulus (the band-edge sky is 4-8x brighter than
+  the image median, so the global star mask flags every pixel) and the
+  background silently fell to 0.  Same bug in sx_phot.circphot.  Added a
+  fallback to the unmasked annulus below min_ann_pix=20 (bulk_phot
+  PhotConfig / --min-ann-pix; circphot MIN_ANNULUS_PIX), a bkg_mode row
+  column, a regression test (25 tests pass), and relaunched the TARS run
+  from scratch at 16:19.  Before/after: qa_before_fix/before_after_TIC_
+  233085422.png.

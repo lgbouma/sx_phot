@@ -15,6 +15,7 @@ dependencies = [
   "pyvo",
   "requests",
   "astroquery",
+  "pyarrow",
   "aesthetic",
   "pytest"
 ]

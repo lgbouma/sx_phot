@@ -24,6 +24,7 @@ from sx_phot.tic_motion import normalize_tic_id
 
 DEFAULT_TIC_ID = "TIC_300651846"
 USE_CUTOUT = True if socket.gethostname() != 'wh3' else False
+USE_CUTOUT = False
 
 
 def _parse_args() -> argparse.Namespace:

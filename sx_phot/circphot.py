@@ -336,6 +336,8 @@ BITMASK = (
 )
 
 ARCSEC_PER_PIXEL = 6.1
+# Minimum unmasked annulus pixels before the star mask is dropped.
+MIN_ANNULUS_PIX = 20
 
 TJD_OFFSET = 56999.5
 
@@ -701,6 +703,12 @@ def get_sx_spectrum(
                             & (~star_mask)
                             & np.isfinite(flux_img)
                         )
+                        # At the LVF band edges the sky is several
+                        # times brighter than the image median, so the
+                        # global star mask can flag the whole annulus;
+                        # fall back to the unmasked annulus there.
+                        if np.count_nonzero(valid) < MIN_ANNULUS_PIX:
+                            valid = ann_mask_img & np.isfinite(flux_img)
                         if np.any(valid):
                             _, bkg_med, _ = sigma_clipped_stats(
                                 flux_img[valid],

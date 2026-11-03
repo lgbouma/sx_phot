@@ -6,6 +6,26 @@ get_spherex.sh:  Use s5cmd to pull all LVF images from AWS.  These are the
   (2025/04/20).  Produces ~1.6Tb/wk in images, or ~100Tb/yr +change.  Scale by
   your time of download.
 
+  Release prefixes (updated 2026-11-01): IRSA ships each quick release under its
+  own S3 prefix (qr2/level2/ ended at 2026W29; qr3/level2/ began at 2026W30 on
+  2026-09-16 with new calibrations).  The script discovers every qr*/ prefix
+  in the bucket and mirrors all of them into the same DEST tree, so a future
+  qr4/ is picked up automatically.  Config knobs (env or edit the script):
+    - SKIP_TAGS="qr2"      frozen releases: checked for new week dirs (cheap)
+                           but not re-listed / re-compared / re-downloaded.
+    - DOWNLOAD_BACKFILL=0  weeks that reappear in a later prefix (i.e. a
+                           reprocessing of weeks already on disk, ~100 TB for
+                           the full mission) are reported but NOT downloaded
+                           unless this is 1.  Note QR2 and QR3 calibrations
+                           differ; do not mix them in one time series.
+    - DRY_RUN=1            everything except the s5cmd download.
+  Email alerts go to ALERT_TO (via sendmail, like ~/bin/check_ar0_disk.sh) when
+  a new qr*/ prefix appears, when backfilled weeks are detected (once per week
+  dir), or when a frozen prefix unexpectedly gains weeks.
+  Persistent state lives in LOGS/state/ (known_tags.txt, weeks_<tag>.txt,
+  backfill_alerted_<tag>.txt).  Artifacts below are now per tag:
+  s3_list_<tag>_YYYYMMDD.txt etc.
+
   - Artifacts: The script writes three date-stamped files into `./LOGS` (created if missing):
     - `s3_list_YYYYMMDD.txt`: Raw listing from S3
     - `sizes_keys_YYYYMMDD.txt`: Parsed `size<TAB>key` lines
@@ -39,7 +59,7 @@ get_spherex.sh:  Use s5cmd to pull all LVF images from AWS.  These are the
   - PATH: The wrapper exports a PATH that includes common locations for `aws` and `s5cmd` so cron can find them.
   - Logs: Daily output is appended to `LOGS/cron_spherex_imagegetter_YYYYMMDD.log`.
   - Reuse: On the same day, the script reuses existing artifacts and proceeds directly to later steps.
-  - Optional: To prevent overlapping runs, the wrapper can be extended to use `flock` on a lockfile.
+  - Locking: the wrapper takes `flock` on `LOGS/.get_spherex.lock`; an overlapping cron invocation logs one line and exits.
 
 ------------------------------------------
 Photometry scripts to get a SPHEREx spectrum
@@ -65,3 +85,14 @@ Photometry scripts to get a SPHEREx spectrum
     Like circphot_slow.py, but way faster because it i) downloads IRSA cutouts by
     default rather than full images, and ii) multithreads over some other
     network-dependent steps.
+
+------------------------------------------
+Bulk photometry wrapper
+
+run_bulk_phot_tars.sh: index -> run_bulk_phot.py -> gather for the TARS
+  catalog.  Env knobs: CATALOG, RUN_DIR (default
+  /ar0/SPHEREX/bulkphot/tars_v0), NPROC (64), OBSCORE_CSV (reuse a
+  snapshot instead of fetching), EXTRA (extra run_bulk_phot.py args).
+  Takes a flock on $RUN_DIR/.lock; safe to re-run daily after the image
+  download: only new files are photometered and the buckets are rebuilt.
+  Logs: $RUN_DIR/pipeline_<stamp>.log and $RUN_DIR/run_bulk_phot.log.
