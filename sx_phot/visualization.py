@@ -15,6 +15,7 @@ from matplotlib.patches import Circle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from astropy.coordinates import SkyCoord
+from astropy.visualization import AsinhStretch, ImageNormalize
 from astropy.wcs import WCS
 
 from aesthetic.plot import savefig, set_style
@@ -72,7 +73,7 @@ def _add_cutout_inset(
     """Add a small cutout inset with the aperture overlay to a host axis.
 
     Args:
-        fig: Figure containing the host axis (unused, retained for API).
+        fig: Figure containing the host axis (used for the colorbar).
         host_ax: Axis to place the inset within.
         image: 2D image array to display.
         wavelength_um: Wavelength label for the inset.
@@ -89,12 +90,24 @@ def _add_cutout_inset(
         finite = np.isfinite(data)
         if not np.any(finite):
             return
-        # Robust display scaling for astronomy images.
-        lo, hi = np.nanpercentile(data[finite], [5, 99.5])
+        # Asinh stretch from just below the sky to the brightest pixel.
+        # The linear-to-log transition sits ~10 sigma above the sky
+        # (sigma from the MAD), so faint sources near the sky level stay
+        # visible and bright neighbours keep their wings unsaturated.
+        vals = data[finite]
+        med = float(np.nanmedian(vals))
+        sig = 1.4826 * float(np.nanmedian(np.abs(vals - med)))
+        lo = med - 2.0 * sig
+        hi = float(np.nanmax(vals))
         if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
-            lo = float(np.nanmin(data[finite]))
-            hi = float(np.nanmax(data[finite]))
-        norm = mcolors.Normalize(vmin=lo, vmax=hi)
+            lo = float(np.nanmin(vals))
+            hi = float(np.nanmax(vals))
+        if lo >= hi:
+            hi = lo + 1.0
+        if not np.isfinite(sig) or sig <= 0:
+            sig = 0.1 * (hi - lo)
+        a = float(np.clip(10.0 * sig / (hi - lo), 1e-3, 0.5))
+        norm = ImageNormalize(vmin=lo, vmax=hi, stretch=AsinhStretch(a))
 
         # Inset occupying ~20% of the axis in the upper-right.
         ax_in = inset_axes(
@@ -104,7 +117,7 @@ def _add_cutout_inset(
             loc="upper right",
             borderpad=0.6,
         )
-        ax_in.imshow(
+        im = ax_in.imshow(
             data,
             origin="lower",
             cmap="magma",
@@ -113,6 +126,29 @@ def _add_cutout_inset(
         )
         ax_in.set_xticks([])
         ax_in.set_yticks([])
+        # Colorbar hugging the left edge of the inset (units: MJy/sr).
+        cax = inset_axes(
+            ax_in,
+            width="7%",
+            height="100%",
+            loc="center left",
+            bbox_to_anchor=(-0.09, 0.0, 1.0, 1.0),
+            bbox_transform=ax_in.transAxes,
+            borderpad=0,
+        )
+        cbar = fig.colorbar(im, cax=cax)
+        cax.yaxis.set_ticks_position("left")
+        # Ticks: sky, the linear-to-log transition, the log midpoint
+        # between transition and peak, and the peak.
+        trans = lo + a * (hi - lo)
+        ticks = [lo, trans]
+        if trans > 0 and hi > trans:
+            ticks.append(float(np.sqrt(trans * hi)))
+        ticks.append(hi)
+        cbar.set_ticks(ticks)
+        cbar.set_ticklabels([f"{t:.3g}" for t in ticks])
+        cbar.ax.tick_params(labelsize=5, length=2, pad=1)
+        cbar.set_label("MJy/sr", fontsize=5, labelpad=1)
 
         label_box = dict(
             facecolor="k",

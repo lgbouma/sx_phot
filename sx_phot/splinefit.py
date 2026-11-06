@@ -404,6 +404,7 @@ def fit_spherex_spectrum_bspline(
     outlier_cut: float = 3.0,
     clip_on_normalized_residuals: bool = True,
     dense_n_per_band: int = 800,
+    skip_failed_bands: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, BandSplineResult]]:
     """Fit band-wise B-splines to a SPHEREx spectrum and return evaluations.
 
@@ -424,6 +425,9 @@ def fit_spherex_spectrum_bspline(
         outlier_cut: Robust sigma cut for clipping.
         clip_on_normalized_residuals: If True, clip on (resid/err).
         dense_n_per_band: Number of samples for dense grid per band.
+        skip_failed_bands: If True, a band with too few points is left out
+            (its model stays NaN and its points unflagged) instead of
+            raising; if every band fails a ValueError is still raised.
 
     Returns:
         model_flux_at_input: Model evaluated at input wavelengths (Jy), same
@@ -470,26 +474,33 @@ def fit_spherex_spectrum_bspline(
     dense_waves: List[np.ndarray] = []
     dense_models: List[np.ndarray] = []
 
+    failures: List[str] = []
     for b in bands:
-        res = fit_band_bspline(
-            wavelength_um=wavelength_um,
-            bandwidth_um=bandwidth_um,
-            flux_jy=flux_jy,
-            flux_err_jy=flux_err_jy,
-            input_mask=eligible,
-            band_name=str(b["name"]),
-            band_min_um=float(b["band_min_um"]),
-            band_max_um=float(b["band_max_um"]),
-            assign_min_um=float(b["assign_min_um"]),
-            assign_max_um=float(b["assign_max_um"]),
-            n_res_el=n_res_el,
-            degree=degree,
-            spacing_mode=spacing_mode,
-            max_iter=max_iter,
-            outlier_cut=outlier_cut,
-            clip_on_normalized_residuals=clip_on_normalized_residuals,
-            dense_n=dense_n_per_band,
-        )
+        try:
+            res = fit_band_bspline(
+                wavelength_um=wavelength_um,
+                bandwidth_um=bandwidth_um,
+                flux_jy=flux_jy,
+                flux_err_jy=flux_err_jy,
+                input_mask=eligible,
+                band_name=str(b["name"]),
+                band_min_um=float(b["band_min_um"]),
+                band_max_um=float(b["band_max_um"]),
+                assign_min_um=float(b["assign_min_um"]),
+                assign_max_um=float(b["assign_max_um"]),
+                n_res_el=n_res_el,
+                degree=degree,
+                spacing_mode=spacing_mode,
+                max_iter=max_iter,
+                outlier_cut=outlier_cut,
+                clip_on_normalized_residuals=clip_on_normalized_residuals,
+                dense_n=dense_n_per_band,
+            )
+        except ValueError as exc:
+            if not skip_failed_bands:
+                raise
+            failures.append(f"{b['name']}: {exc}")
+            continue
         band_results[res.band_name] = res
 
         # Map back to global arrays.
@@ -499,6 +510,8 @@ def fit_spherex_spectrum_bspline(
         dense_waves.append(res.dense_wavelength_um)
         dense_models.append(res.dense_model_flux_jy)
 
+    if not band_results:
+        raise ValueError("No band could be fit: " + "; ".join(failures))
     dense_wave_um = np.concatenate(dense_waves)
     dense_model_flux_jy = np.concatenate(dense_models)
 

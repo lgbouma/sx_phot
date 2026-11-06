@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sx-ml · UMAP explorer</title>
+<link rel="stylesheet" href="styles.css">
+<script src="vendor/plotly.min.js"></script>
+<script src="scatter.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <h1>sx-ml</h1>
+  <span class="nav"><a href="index.html">home</a><a href="umap.html"><b>UMAP explorer</b></a><a href="sequence.html">spectral sequence</a></span>
+  <span class="muted small" id="status">loading…</span>
+  <span style="flex:1"></span>
+  <span class="small muted">drag: pan · wheel: zoom · shift+drag: lasso · click: star · <b>r</b> random · <b>f</b> fit view</span>
+</div>
+<div class="umap-layout">
+  <div class="sidebar">
+    <h3>Embedding</h3>
+    <select id="emb"></select>
+    <label>colour by</label>
+    <input id="colsearch" type="text" list="collist" placeholder="column name…">
+    <datalist id="collist"></datalist>
+    <select id="col" size="1"></select>
+    <div class="small muted" id="colnote"></div>
+    <div class="row" style="margin-top:4px">
+      <input id="vmin" type="number" step="any" title="colour range min">
+      <input id="vmax" type="number" step="any" title="colour range max">
+    </div>
+    <div class="row">
+      <select id="cmap">
+        <option value="viridis">viridis</option>
+        <option value="turbo">turbo</option>
+        <option value="coolwarm">coolwarm</option>
+        <option value="magma">magma</option>
+        <option value="grey">grey</option>
+      </select>
+      <button id="autorange" title="1-99 percentile">auto</button>
+      <button id="flipcmap" title="reverse colormap">flip</button>
+    </div>
+    <label>log colour scale <input id="logc" type="checkbox"></label>
+    <h3>Points</h3>
+    <label>size <span id="sizeval" class="muted">2</span></label>
+    <input id="size" type="range" min="1" max="8" step="0.5" value="2" style="width:100%">
+    <label>opacity <span id="alphaval" class="muted">0.6</span></label>
+    <input id="alpha" type="range" min="0.05" max="1" step="0.05" value="0.6" style="width:100%">
+    <h3>Filter (shown points)</h3>
+    <select id="fcol"><option value="">(none)</option></select>
+    <div class="row">
+      <input id="fmin" type="number" step="any" placeholder="min">
+      <input id="fmax" type="number" step="any" placeholder="max">
+    </div>
+    <div class="row"><button id="fapply">apply</button><button id="fclear">clear</button></div>
+    <div class="small muted" id="fstatus"></div>
+    <h3>Find</h3>
+    <div class="row"><input id="tic" type="text" placeholder="TIC id"><button id="go">go</button></div>
+    <h3>Selection</h3>
+    <div id="selinfo" class="small muted">none</div>
+    <div class="row"><button id="selclear">clear</button><button id="selcsv">CSV</button><button id="selzoom">zoom</button></div>
+    <h3>Link</h3>
+    <div class="small"><a id="permalink" href="#">permalink to this view</a></div>
+  </div>
+  <div class="plotwrap">
+    <canvas id="glcanvas"></canvas>
+    <canvas id="overlay"></canvas>
+    <div class="tooltip" id="tooltip"></div>
+    <div class="colorbar" id="colorbar"><canvas id="cbcanvas" width="180" height="10"></canvas><div class="labels"><span id="cbmin"></span><span id="cbname"></span><span id="cbmax"></span></div></div>
+    <div class="hud" id="hud"></div>
+  </div>
+  <div class="rightpanel">
+    <div class="tabs">
+      <button id="tab-star" class="active">star</button>
+      <button id="tab-sel">selection</button>
+    </div>
+    <div id="pane-star">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div id="startitle" class="muted">click a point</div>
+        <button id="speclegend" class="small" style="flex:0 0 auto" title="show / hide the spectrum legend">hide legend</button>
+      </div>
+      <div id="spec" class="plot"></div>
+      <div id="resid" class="plot short"></div>
+      <table class="kv" id="starinfo"></table>
+    </div>
+    <div id="pane-sel" class="hidden">
+      <div id="seltitle" class="muted">shift+drag to lasso a group</div>
+      <div id="selresid" class="plot"></div>
+      <div id="selnorm" class="plot short"></div>
+      <div id="selhist" class="plot short"></div>
+      <table class="kv" id="selstats"></table>
+    </div>
+  </div>
+</div>
+<script src="umap.js"></script>
+</body>
+</html>

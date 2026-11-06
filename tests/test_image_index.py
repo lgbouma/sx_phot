@@ -112,3 +112,45 @@ def test_parse_obscore_and_images_containing(tmp_path: Path):
     assert list(hit) == [1]
     assert images_containing(parsed, 15.0, 0.0).size == 0
     assert images_containing(parsed, 10.0, 1.6).size == 0
+
+
+def test_latest_obscore_snapshot(tmp_path: Path):
+    """The newest date-stamped snapshot is chosen; None when absent."""
+    from sx_phot.image_index import latest_obscore_snapshot
+    assert latest_obscore_snapshot(tmp_path) is None
+    (tmp_path / "obscore_20261102.csv").write_text("obs_id\n")
+    (tmp_path / "obscore_20261103.csv").write_text("obs_id\n")
+    assert latest_obscore_snapshot(tmp_path).name == "obscore_20261103.csv"
+
+
+def test_build_index_falls_back_when_fetch_fails(tmp_path: Path,
+                                                 monkeypatch):
+    """A failed ObsCore fetch reuses the newest local snapshot."""
+    import sx_phot.image_index as ii
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("503 Server Error")
+
+    monkeypatch.setattr(ii, "fetch_obscore_snapshot", boom)
+    (tmp_path / "obscore_20261102.csv").write_text("obs_id\n")
+    seen = {}
+
+    def fake_parse(path):
+        seen["csv"] = Path(path)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(ii, "parse_obscore_snapshot", fake_parse)
+    monkeypatch.setattr(ii, "scan_local_store",
+                        lambda root: pd.DataFrame(
+                            {"path": [], "obs_id": [], "det": [],
+                             "week_cam": [], "ver": []}))
+    monkeypatch.setattr(ii, "load_week_tags", lambda d: {})
+    try:
+        ii.build_image_index(
+            store_root=tmp_path, out_parquet=tmp_path / "idx.parquet",
+            state_dir=tmp_path, fetch=True,
+        )
+    except Exception:
+        pass  # empty inputs may not build a full index; the fetch
+        # fallback is what is under test
+    assert seen["csv"].name == "obscore_20261102.csv"

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sx-viz | star</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="vendor/plotly.min.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <span class="badge">sx-viz</span>
+        <a href="index.html" id="back-link">&larr; table</a>
+        <span id="star-title" style="margin-left:14px; font-weight:600"></span>
+        <span id="star-sub" class="muted small"></span>
+      </div>
+      <nav class="nav">
+        <span class="small muted">nav <span class="kbd">k</span>/<span class="kbd">j</span>
+          · verdict <span class="kbd">1</span>-<span class="kbd">4</span>, <span class="kbd">0</span> clear
+          · <span class="kbd">m</span> masked · <span class="kbd">n</span> notes
+          · <span class="kbd">[</span>/<span class="kbd">]</span> TESS sector</span>
+        <button id="prev-star" type="button">&larr; prev</button>
+        <span id="nav-pos" class="small muted"></span>
+        <button id="next-star" type="button">next &rarr;</button>
+        <button id="random-star" type="button" title="random star from the current list (r)">random</button>
+      </nav>
+    </header>
+
+    <div class="star-layout">
+      <aside class="col col-left">
+        <div class="panel">
+          <h3>Verdict</h3>
+          <div class="verdict-buttons">
+            <button data-verdict="binary" type="button">1 binary cand.</button>
+            <button data-verdict="single" type="button">2 single</button>
+            <button data-verdict="unsure" type="button">3 unsure</button>
+            <button data-verdict="junk" type="button">4 junk / bad</button>
+          </div>
+          <textarea id="notes" placeholder="notes (saved with the verdict, or on paging)"></textarea>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:4px">
+            <button id="save-notes" type="button">Save</button>
+            <button id="clear-verdict" type="button">0 clear</button>
+            <label class="small muted"><input id="auto-advance" type="checkbox" checked /> next after verdict</label>
+          </div>
+          <div id="verdict-status" class="status"></div>
+        </div>
+
+        <div class="panel">
+          <h3>TARS / Gaia</h3>
+          <table class="kv" id="tars-table"></table>
+        </div>
+
+        <div class="panel">
+          <h3>Spectrum summary</h3>
+          <table class="kv" id="summary-table"></table>
+        </div>
+
+        <div class="panel">
+          <h3>Links</h3>
+          <div id="links" class="small"></div>
+        </div>
+      </aside>
+
+      <main class="col">
+        <div class="plot-controls">
+          <label><input type="checkbox" id="show-masked" /> masked</label>
+          <label><input type="checkbox" id="show-clipped" checked /> clipped</label>
+          <label><input type="checkbox" id="show-spline" checked /> spline</label>
+          <label><input type="checkbox" id="show-binned" /> binned</label>
+          <label><input type="checkbox" id="show-sed" checked /> SED models</label>
+          <label><input type="checkbox" id="log-axes" checked /> log axes</label>
+          <label><input type="checkbox" id="color-time" /> colour by time</label>
+          <span class="muted small">hollow points carry a soft (TRANSIENT/OVERFLOW) flag · click a point to load its SPHEREx cutout</span>
+        </div>
+        <div id="spectrum-plot" class="plot"></div>
+        <div id="ratio-plot" class="plot"></div>
+
+        <div class="panel" style="margin-top:12px">
+          <h3>TARS vetting (TESS) <span class="muted" style="text-transform:none; letter-spacing:0">· <a id="lcviz-link" href="#" target="_blank">open in lcviz</a></span></h3>
+          <div class="tarsvet-nav">
+            <button id="tarsvet-prev" type="button" title="previous sector ([)">&larr; sector</button>
+            <span id="tarsvet-pos" class="small muted"></span>
+            <button id="tarsvet-next" type="button" title="next sector (])">sector &rarr;</button>
+            <span id="period-text" class="muted small"></span>
+          </div>
+          <div id="tarsvet" class="tarsvet"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <h3>Cutouts <span class="muted" style="text-transform:none; letter-spacing:0">· sky 3' (N up, E left; circles: 2 px aperture, 6-8 px annulus) · SPHEREx 4' · click a SPHEREx tile or a spectrum point to enlarge</span></h3>
+          <div class="plot-controls">
+            <select id="survey-a"></select>
+            <select id="survey-b"></select>
+          </div>
+          <div class="cutout-row cutout-row-3">
+            <div class="cutout" id="sky-a"><img alt="" /><span class="label"></span></div>
+            <div class="cutout" id="sky-b"><img alt="" /><span class="label"></span></div>
+            <div class="cutout" id="spx-selected"><img alt="" /><span class="label">selected image</span></div>
+          </div>
+          <div id="spx-selected-info" class="small muted"></div>
+          <div class="cutout-row cutout-row-6" id="spx-grid"></div>
+        </div>
+      </main>
+
+      <aside class="col col-right">
+        <div class="panel">
+          <h3>SED model comparison</h3>
+          <table class="kv model-table" id="model-table"></table>
+          <div id="model-verdict" class="small" style="margin-top:4px"></div>
+          <p class="muted small" style="margin:6px 0 0">
+            SPHINX (Teff &le; 4000 K) and Castelli-Kurucz grids at the dwarf log g, [M/H] = 0;
+            R=40 binned spectrum with a 2% error floor; BIC = chi2 + k ln n.
+            <a id="sed-json" href="#" target="_blank">fit JSON</a>
+          </p>
+        </div>
+        <div class="panel">
+          <h3>Fit details</h3>
+          <table class="kv" id="sed-table"></table>
+        </div>
+        <div class="panel">
+          <h3>Report</h3>
+          <a id="report-link" class="report-link" href="#" target="_blank"><img id="report-img" alt="report" /></a>
+          <div class="small muted">static matplotlib summary (click to open; cached on first view)</div>
+        </div>
+      </aside>
+    </div>
+    <script src="star.js"></script>
+  </body>
+</html>

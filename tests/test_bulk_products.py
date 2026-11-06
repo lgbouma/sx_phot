@@ -88,10 +88,38 @@ def test_gather_and_load(tmp_path: Path):
 
 
 def test_gather_rejects_bad_bucket_size(tmp_path: Path):
-    """stars_per_bucket must be a power of two."""
+    """stars_per_bucket and buckets_per_group must be powers of two."""
     run = _make_run(tmp_path)
     with pytest.raises(ValueError):
         gather_by_star(run, stars_per_bucket=3)
+    with pytest.raises(ValueError):
+        gather_by_star(run, stars_per_bucket=2, buckets_per_group=3)
+
+
+def test_gather_many_groups_matches_pass_files(tmp_path: Path):
+    """Multi-group gather keeps every row, sorted by star within bucket."""
+    run = _make_run(tmp_path)
+    meta = gather_by_star(run, stars_per_bucket=1, buckets_per_group=2,
+                          nproc=2)
+    assert meta["n_rows"] == 4
+    assert meta["n_buckets"] == 5
+    assert not (run / "bystar.groups").exists()
+    assert not (run / "bystar.part").exists()
+    assert sorted(p.name for p in (run / "bystar").iterdir()) == [
+        "bucket=0", "bucket=2"]
+    got = pd.concat(
+        pd.read_parquet(p) for p in (run / "bystar").glob("*/*.parquet")
+    )
+    want = pd.concat(
+        pd.read_parquet(p) for p in (run / "phot").glob("*/*.parquet")
+    )
+    assert list(got.columns) == list(ROW_DTYPES)
+    key = ["star_idx", "image_key"]
+    pd.testing.assert_frame_equal(
+        got.sort_values(key).reset_index(drop=True),
+        want.sort_values(key).reset_index(drop=True),
+    )
+    assert len(load_star_rows(run, 102)) == 3
 
 
 def test_legacy_frame_and_materialize(tmp_path: Path):
@@ -131,3 +159,38 @@ def test_supplement_with_spline_columns():
         assert col in supp.columns
     assert np.isfinite(supp["model_flux"]).mean() > 0.9
     assert supp["res_valid"].sum() > 200
+
+
+def test_materialize_run_writes_all_stars(tmp_path: Path):
+    """materialize_run writes one CSV per star with rows and a summary."""
+    from sx_phot.bulk_products import materialize_run
+
+    run = _make_run(tmp_path)
+    gather_by_star(run, stars_per_bucket=2)
+    summary = materialize_run(run, tmp_path / "csv", id_prefix="GaiaDR3",
+                              supplement=False, nproc=2)
+    assert len(summary) == 5
+    assert set(summary.loc[summary["n"] > 0, "ticid"]) == {100, 102}
+    assert summary.set_index("ticid").loc[102, "n"] == 3
+    assert summary.set_index("ticid").loc[102, "star_id"] == "GaiaDR3_102"
+    written = sorted(p.name for p in (tmp_path / "csv").glob("*.csv"))
+    assert len(written) == 3  # two stars + summary.csv
+    assert any(n.startswith("sxphot_cache_GaiaDR3_102_") for n in written)
+    assert (tmp_path / "csv" / "summary.csv").exists()
+    one = pd.read_csv(summary.set_index("ticid").loc[102, "cache"])
+    assert list(one["wavelength_um"]) == sorted(one["wavelength_um"])
+
+
+def test_materialize_run_subset(tmp_path: Path):
+    """ticids restricts the output to the requested stars."""
+    from sx_phot.bulk_products import materialize_run
+
+    run = _make_run(tmp_path)
+    gather_by_star(run, stars_per_bucket=2)
+    out = tmp_path / "csv"
+    summary = materialize_run(run, out, nproc=1, ticids=[102, 999])
+    assert list(summary["ticid"]) == [102]
+    assert int(summary["n"].iloc[0]) == 3
+    files = sorted(p.name for p in out.glob("*.csv"))
+    assert len(files) == 2  # cache (3 rows: no spline), summary
+    assert all("TIC_102" in f or f == "summary.csv" for f in files)

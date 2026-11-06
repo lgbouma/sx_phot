@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sx-viz | SPHEREx spectra of TARS rotators</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <span class="badge">sx-viz</span>
+        <span id="title-text">SPHEREx spectra of TARS rotators</span>
+        <span id="meta-text" class="muted small"></span>
+      </div>
+      <nav class="nav">
+        <button id="random-btn" type="button" title="Open a random star from the filtered rows (r)">Random (r)</button>
+        <a class="button" href="README.md" target="_blank">Help</a>
+      </nav>
+    </header>
+
+    <div class="home-layout">
+      <aside class="sidebar">
+        <h3>Search</h3>
+        <input id="search-input" type="search" placeholder="TIC id (prefix ok)" style="width:100%" />
+
+        <h3>Presets</h3>
+        <div class="chip-row" id="presets"></div>
+
+        <h3>Filters</h3>
+        <div id="filters"></div>
+
+        <h3>Flags</h3>
+        <div class="chip-row" id="flag-chips"></div>
+
+        <div style="margin-top:10px; display:flex; gap:6px;">
+          <button id="apply-btn" class="primary" type="button">Apply</button>
+          <button id="reset-btn" type="button">Reset</button>
+        </div>
+
+        <details style="margin-top:14px">
+          <summary class="muted small">Columns</summary>
+          <div id="column-toggles" class="column-toggles"></div>
+        </details>
+
+        <p class="muted small" style="margin-top:14px">
+          Rows: TARS table 2 stars with a SPHEREx spectrum in the bulk run.
+          SED columns: <code>teff_full</code> single-model Teff (SPHINX for
+          Teff &le; 4000 K, Castelli-Kurucz above); <code>red_excess</code>
+          fractional excess of the data over a model fitted only below 1.7 um,
+          measured at 2.4-5 um; <code>red_excess_rel</code> the same with
+          the population median at that Teff subtracted (use this one: the
+          raw value has a Teff-dependent offset of several percent);
+          <code>radius_ratio_full</code> fitted radius
+          (needs Gaia parallax) over the dwarf radius at that Teff
+          (<code>_rel</code>: over the population median at that Teff);
+          <code>dbic_binary</code> / <code>dbic_disk</code> BIC of the single
+          star minus BIC of the two-star / star+dust model (positive favours
+          the model; <code>dbic_disk_vs_binary</code> positive favours dust
+          over a second star).  Click a row for the star page.
+        </p>
+      </aside>
+
+      <main class="main">
+        <div class="table-header">
+          <span id="row-count" class="pill">0 rows</span>
+          <span id="sort-pill" class="pill">sort: ticid</span>
+          <button id="prev-btn" type="button">&larr; prev</button>
+          <span id="page-text" class="small muted"></span>
+          <button id="next-btn" type="button">next &rarr;</button>
+          <label class="small muted">page size
+            <select id="page-size">
+              <option>50</option><option selected>100</option><option>200</option><option>500</option>
+            </select>
+          </label>
+          <a id="csv-link" class="small" href="#" title="Current page as CSV">csv</a>
+          <span id="status" class="status"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr id="table-headers"></tr></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

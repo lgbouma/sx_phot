@@ -22,3 +22,237 @@ DONE (running history; see TODO.txt for the roadmap)
   column, a regression test (25 tests pass), and relaunched the TARS run
   from scratch at 16:19.  Before/after: qa_before_fix/before_after_TIC_
   233085422.png.
+
+2026-11-03  TARS table 2 run finished: 1,516,752 images, 513.7M rows, 0
+  failures, 28.4 h at 14.9 files/s (disk bound); gathered into 1022
+  buckets (28 GB) in /ar0/SPHEREX/bulkphot/tars_v0/bystar.  Top-up pass
+  for the ~90k files downloaded after the index was built.  IRSA TAP
+  returned 503 during the top-up, so build_image_index now falls back to
+  the newest local ObsCore snapshot (tested).  Downloaded TARS table 4
+  (Zenodo 19917941, 13.4 GB, 39.0M TIC/sector rows, 7,481,030 unique
+  stars, superset of table 2) and wrote the de-duplicated catalog
+  /ar0/local/TARS/zenodo_19917941/tars_table_4_unique_stars.parquet.
+  Benchmark: 1.3 s CPU per image for ~2300 stars/image, so the 7.5M-star
+  run is still disk bound.  Launched it into /ar0/SPHEREX/bulkphot/
+  tars4_v0 after the top-up pass.
+
+2026-11-04  sx-viz: web viewer for the TARS SPHEREx spectra
+  (apps/sx-viz, stdlib HTTP server + plotly pages, port 8051; same
+  pattern as cpv-viz).  New library modules: sx_phot/viz_products.py
+  (per-star spectrum tables with one parquet row group per star, per-star
+  summaries, R=40 binned spectra; 35 s per 1024-star bucket, 2 ms per-star
+  reads), sx_phot/sedmodels.py (SPHINX C/O=0.5 and Castelli-Kurucz 2004
+  grids resampled onto the SPHEREx bins and cached under
+  /ar0/local/models/cache), sx_phot/sedfit.py (single, blue-anchored and
+  two-component fits with analytic scales; radius from parallax; red
+  excess per band; 3.4 ms per star), sx_phot/viz_report.py (SPHEREx
+  cutouts with aperture/annulus, report PNG).  Drivers:
+  build_viz_products.py (12 workers, nice 19), fit_viz_seds.py.  Tests:
+  test_sedfit.py, test_viz_products.py (13 pass).  Models downloaded to
+  /ar0/local/models (SPHINX Zenodo 11392341, ck04 from STScI, Mamajek
+  dwarf table).  On the 1024-star test bucket the fitted Teff correlates
+  with TARS Teff at r=0.84 (median offset +54 K, MAD 200 K); the top
+  red-excess star (TIC 302538976) is a blended pair in the DSS cutout.
+  Full run: products for 1,046,317 stars built in 31 min (12 workers),
+  SED fits in 3 min (10 workers).  Population check (n_used >= 100):
+  fitted Teff vs TARS Teff r = 0.81, median +56 K; the raw red excess has
+  a Teff-dependent offset (-9% for 3500-4000 K, 0% above 4500 K), so
+  sedfit.add_population_columns adds Teff-relative columns
+  (red_excess_rel, *_rel_sig, radius_ratio_full_rel).  39k stars have
+  red_excess_rel_sig > 5, but that fraction is the same for RUWE > 1.4,
+  Gaia non_single_star and TARS flag_possible_binary stars as for the
+  rest (3.6-3.9%), and the top of the list is blends; by contrast the
+  Teff-relative radius ratio is 1.19 for RUWE > 1.4 stars vs 0.97 for the
+  rest, so overluminosity, not colour, is where the unresolved binaries
+  show at this precision.
+
+2026-11-04  sx-viz round 2.  (1) Quality masks: the gross outliers in
+  e.g. TIC 1001069524 were rows with x ~ 2039, i.e. the star centre at
+  the array edge and part of the aperture off the detector (median flux
+  ratio 0.11 beyond the edge, 0.86 at 0-1 px, 0.98 at 1-2 px, 0.99
+  further in); viz_products now masks edge < 2 px, flags gross outliers
+  against a 21-point running median (factor 1.8 and 5 sigma), and treats
+  TRANSIENT/OVERFLOW (bits 0, 1) as soft: over one bucket their fluxes sit
+  on the clean spline to 1% (MAD 3%) but their errors are 2-10x too small
+  and single stars can have a neighbour's overflow pixel in the aperture,
+  so a soft point is used only if it agrees with the clean-point spline
+  within 3 sigma (3% floor) and a factor 1.25; mask_bits records the
+  reason.  (2) sedfit: star + dust blackbody model (200-2000 K) and BIC
+  comparison of single / two stars / star + dust (dbic_binary, dbic_disk,
+  dbic_disk_vs_binary, f_disk).  (3) Star page: model comparison table in
+  the right column, cutouts under the plots, refit controls removed
+  (/api/sed stays), TARS vetting JPEGs proxied from lcviz on wh2 via
+  /api/tarsvet.  (4) scripts/plot_dchi2_binary_vs_period.py: histogram of
+  the binary evidence and the fraction above thresholds in log-uniform
+  period bins.
+  Rebuilt products (1022 buckets, 33 min; 2.7M edge rows = 0.49% masked,
+  2.2M gross outliers, 50% of the 33.7M soft points admitted; spline_ok
+  99.8%; Teff(fit) vs TARS r = 0.84) and fits (72 columns incl. the
+  Teff-percentile ranks dbic_*_pct).  Binary evidence vs period
+  (results/sx_viz_analysis): the single-star fit has chi2/dof ~ 3, so
+  dBIC > 10 / 100 select 57% / 29% of stars and the all-star trend with
+  period is a Teff-mixing artefact (cool stars rise with period, hot
+  stars fall).  At fixed Teff (percentile rank) the fraction in the top
+  decile of binary evidence is 13-14% for P = 0.3-4 d and 5-6% for
+  P > 8 d, and the decline persists in Tmag bins (bright 20% -> 5%, faint
+  11% -> 8%), which suggests more unresolved companions among the fast
+  rotators; dBIC > 1000 (1.3%) is flat with period.
+
+
+2026-11-04  sx-viz star page layout, round 3: dropped the plotly
+  flux/spline-vs-time/phase panel (the report PNG keeps it); the TARS
+  vetting panel now sits directly under the spectrum and ratio plots and
+  shows one lcviz sector at a time with prev/next buttons (keys [ and ],
+  neighbours preloaded); cutouts moved to the bottom of the page.  No
+  server or product changes.
+
+
+2026-11-04  Bulk products for arbitrary catalogs: drivers/
+  materialize_bulk_run.py (sx_phot.bulk_products.materialize_run: all
+  stars of a gathered run in one pass, --id-prefix for non-TIC ids,
+  summary.csv) and drivers/plot_bulk_qa.py (per-star spline PNGs,
+  overview grid, qa_summary.csv), with a test.  Used for the SPYGLASS
+  VIIa PSP member list (1161 Gaia DR3 stars, only 752 in TARS table 4):
+  dedicated run /ar0/SPHEREX/bulkphot/spyglass_viia_psp_v0 opens only
+  the 74,938 images with a candidate (the pipeline skips images with no
+  catalog star before opening them).  Starved to 2 images/s next to the
+  64-worker table 4 run, so table 4 was paused with SIGSTOP for 68 min
+  and resumed with SIGCONT (no data loss; shard state stays in memory):
+  2.3 h total, 423,098 rows, 0 failures, all 1161 stars covered (136-496
+  images each, median 364, 14% masked).  Products in csv/ (hand-off:
+  2319 files, 1157 spline supplements; the 4 without are fully
+  saturated or S/N ~ 1), qa/ (1161 PNGs + overview grid), all_rows.
+  parquet, README.txt.  materialize_run uses skip_failed_bands=True like
+  viz_products so saturated bright stars keep a spline in their
+  unsaturated bands.  plot_bulk_qa.py carries the circphot cutout inset
+  (image nearest 0.93 um, aperture overlay) so crowding is visible; the
+  legend moves outside the axes to make room.  The shared inset helper
+  (sx_phot.visualization._add_cutout_inset, also used by circphot) now
+  uses an asinh stretch from 2 sigma below the sky to the brightest
+  pixel, with the linear-to-log transition 10 sigma (MAD) above the sky,
+  and a MJy/sr colorbar with four ticks (sky, transition, log midpoint,
+  peak), instead of a linear 5-99.5 percentile stretch; tested.  README in the run dir
+  states the time baseline (MJD 60789.8-61317.9, 2025-04-24 to
+  2026-10-04; per star 370-420 d, three passes for 92% of stars).
+
+
+2026-11-04  LLM_CONTEXT/data_products.md: where the bulk spectral
+  archives (tars_v0, tars4_v0, spyglass_viia_psp_v0), image mirror and
+  index live, the run-dir layout, how to materialize a spectrum, and
+  the caveats; AGENTS.md now tells agents to read LLM_CONTEXT/ first
+  and keep it current.
+
+
+2026-11-04  sx-ml: machine learning on the 1.05M TARS table 2 spectra.
+  (1) sx_phot/specml.py: empirical one-parameter spectral sequence from
+  146,201 clean main-sequence stars (all 76 bins, S/N >= 50, A0 <= 0.2,
+  RUWE < 1.4, no NSS flag, no TESS contaminants, within -0.4/+0.5 mag of
+  the dereddened main sequence); dereddened with the GSP-Phot A0 (CCM89),
+  normalized log fluxes, principal-curve iteration (node medians with a
+  local slope correction, reassignment on a fine grid with free scale,
+  rank transform, nodes respaced uniformly in arc length with the end
+  nodes at t = 0 and 1, chi2 clipping at 4x the local median from the
+  second iteration; 6 iterations, rank correlation 0.9999, 141,678
+  inliers).  192 nodes from 7397 K (BP-RP0 0.37) to 3039 K (BP-RP0
+  3.37); the 16-84% TARS Teff range per node is ~100 K; intrinsic
+  scatter per bin 1-2%; water bands at 1.4/1.9/2.7 um and CO at 2.3 and
+  4.6 um grow smoothly toward the cool end.  Without the contaminant cut
+  7% of the training stars had K-dwarf spectra at M-dwarf Gaia colours
+  (blends: median 8 TESS contaminants); without the local-linear
+  medians and arc-length nodes the ends were truncated (4% inliers at
+  BP-RP0 > 3.2, now 82%).  Library: templates, scatter, absolute
+  offsets at 10 pc, first three residual eigenvectors, node summaries,
+  monotone Teff map; /ar0/SPHEREX/bulkphot/tars_v0/ml/sequence.npz.
+  (2) sx_phot/empfit.py + drivers/fit_empirical.py: single, main-
+  sequence-at-Gaia-distance, two-star (shape only and at the Gaia
+  distance), and star + blackbody fits of the library to all stars with
+  errors that include the population scatter; 1,013,097 stars in 8.5 min
+  on 40 workers; median chi2/dof 1.39 (model atmospheres: 3.00); dBIC >
+  10 / 100 select 24% / 2.8% (model: 56% / 29%).  The band-6 and red
+  excess medians per Teff bin are 0.4% / 0.1% (model: 2.8% / 1.0%, with
+  the SPHINX-ck04 seam at 4000 K); the per-star 16-84% widths shrink
+  from 8.8% / 5.4% to 5.1% / 1.8%.  RUWE > 1.4 fraction in the top 10% /
+  1% at fixed t: Gaia-distance binary dBIC 0.26 / 0.30, overluminosity
+  0.26 / 0.33, CMD offset 0.27 / 0.30, shape-only dBIC 0.17 / 0.15,
+  model dBIC 0.20 / 0.12 (all stars 0.15); the top-decile fraction of
+  every binary statistic falls from 0.12-0.13 at P < 1 d to 0.05-0.07
+  at P > 10 d.  151 candidates with both binary statistics in the top
+  2% (33% RUWE > 1.4) and 1616 disk candidates (blackbody preferred
+  over a second star, > 20% of the star in band 6; median Teff 4520 K,
+  T_bb 930 K) in results/sx_ml_analysis/ (scripts/analyze_empfit.py),
+  both excluding the 4.6% of stars pinned at the sequence ends.  Band-6
+  residuals drift with magnitude at fixed t (TODO).
+  (3) drivers/run_umap.py: UMAP of the normalized shapes (missing bins
+  imputed from the template) and of the noise-whitened residuals, 12
+  PCs each, n_neighbors 30, min_dist 0.05.
+  (4) apps/sx-ml (port 8052): umap.html (custom WebGL scatter of ~1M
+  points, colour by any of 123 columns, hover/click star panel with the
+  template curves and residuals, shift-drag lasso with the group's
+  median residual spectrum and column medians, filters, permalinks) and
+  sequence.html (slider in arc length / t / Teff through the templates
+  with the population band, model atmosphere at the mapped Teff, second
+  parameter slider, example stars, library image, Teff and M_G0
+  mapping).  sx-viz's table now carries emp_* columns from
+  empfit.parquet.  Tests: test_specml, test_empfit, test_sxml_server.
+  LLM_CONTEXT/data_products.md lists the ml/ products.
+
+2026-11-05  sx-ml: overluminous fraction vs rotation period figure
+  (results/sx_ml_analysis/binary_fraction_vs_period.png, from
+  scripts/analyze_empfit.py).  Clean stars > 0.375 mag above the main
+  sequence at the Gaia distance: 50% at P < 1 d vs 14% at P > 10 d with
+  SPHEREx, 35% vs 11% with the Gaia CMD; RUWE > 1.4 is flat at 16-19%.
+
+2026-11-05  sx-ml UMAP page: "isn't loading" fix.  Without WebGL2 the
+  scatter constructor threw before any error handler existed, leaving
+  the page at "loading…" with a blank plot.  scatter.js now falls back
+  to a 2D-canvas renderer (ImageData splatting, ~150 ms per redraw for
+  1e6 points), umap.js shows script errors in the status bar and the
+  renderer in the HUD, redraws are backed by a timeout so a stalled
+  animation frame cannot leave the canvas blank, and the canvas is
+  resized at construction and by a ResizeObserver.  Verified with
+  headless Firefox screenshots (recipe in apps/sx-ml/README.md).
+  Root cause on the user's browser: the shaders declared no int
+  precision, so strict GL drivers refused to link ('Precisions of
+  uniform u_mode differ'); both shaders now declare highp int.
+
+2026-11-05  TARS table 4 photometry complete: 1,607,473 images, 3.57B
+  rows, 0 failures, 34.0 h at 13.1 files/s (last 12 h confined to half
+  the cores for the user's ML).  The one-stage gather (7306 bucket
+  files open at once) then grew past RAM and was killed with swap
+  full.  gather_by_star is now two-stage with plain parquet reads and
+  writes (a first attempt that streamed stage 1 through
+  pyarrow.dataset.write_dataset buffered 65 GB while writing <1 GB and
+  was OOM-killed by its cgroup): stage 1 splits one pass file at a
+  time into bystar.groups/group=G/ (64 buckets per group, 4 s and
+  1.1 GB per file), stage 2 reads one group at a time, sorts it by
+  star_idx and writes its bucket files (--buckets-per-group, --nproc
+  on drivers/gather_bulk_phot.py).  Bucket files are now sorted by
+  star.  Relaunched for tars4_v0 under a 64 GB systemd-run cgroup cap
+  with swap disabled (MemorySwapMax=0), which contained the first
+  failure to the unit.  Test: test_gather_many_groups_matches_pass_files.
+
+2026-11-05  TARS table 4 gathered: /ar0/SPHEREX/bulkphot/tars4_v0/bystar
+  (3,572,192,971 rows, 7306 buckets, 164 GB) in 62 min with 4 workers
+  under the 64 GB cap (stage 1 32 min, stage 2 30 min; anonymous
+  memory ~3 GB in stage 1, the rest page cache).  Row count matches
+  the photometry log exactly; TIC 300651846 has identical rows (563,
+  max flux difference 0) in tars_v0 and tars4_v0.  A bucket read takes
+  ~7 s (37 MB files).  LLM_CONTEXT/data_products.md updated.
+
+2026-11-05  tars4_v0 QA sample: materialize_bulk_run.py --sample N /
+  --ticid-file (materialize_run(ticids=...) reads only the needed
+  buckets) + plot_bulk_qa.py on 200 random stars ->
+  /ar0/SPHEREX/bulkphot/tars4_v0/qa_sample/{csv,qa} (4 min under a
+  32 GB cap).  All 200 have rows (222-14973 per star, median 369; the
+  >5000-row stars are deep-field targets at |ecliptic latitude| > 79
+  deg with distinct images), 13% masked, median S/N 79, 199 spline
+  products.  The overview grid looks like the table 2 QA: saturated
+  bright stars masked below 4 um, a few unflagged outliers.
+  Test: test_materialize_run_subset.
+
+2026-11-05  sx-viz memory: the server held 13 GB resident plus all 7.8 GB
+  of swap because SpectrumStore.prewarm opened all 1022 spectra parquet
+  files and kept the ParquetFile handles (parsed footers, ~17 MB each,
+  17.8 GB measured).  The store now keeps an LRU of max_open=64 handles
+  (a cold open plus read costs ~70 ms) and prewarm respects the cap.
+  Takes effect when the sx-viz server is restarted.

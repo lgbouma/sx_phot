@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sx-ml</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>sx-ml</h1>
+  <span class="nav"><a href="umap.html">UMAP explorer</a><a href="sequence.html">spectral sequence</a></span>
+  <span class="muted" id="meta"></span>
+</div>
+<div class="landing">
+  <h2><a href="umap.html">UMAP explorer</a></h2>
+  <p>A million SPHEREx spectra (TARS table 2) as points in a UMAP embedding of their
+  normalized spectral shapes, or of their residuals from the empirical single-star
+  template.  Colour by any catalog, fit or embedding column; hover and click for a
+  star's spectrum and fits; <b>shift+drag</b> to lasso a group and see its median
+  residual spectrum against the single-star templates.  Links go to the sx-viz star page.</p>
+  <h2><a href="sequence.html">Spectral sequence</a></h2>
+  <p>The empirical one-parameter template library: drag the slider along the sequence
+  (by arc length, parameter or mapped Teff) and watch the median SPHEREx spectrum
+  change, with its population scatter, the model atmosphere at the same Teff, the
+  second empirical parameter (first residual eigenvector) and example stars.</p>
+  <h2>Products</h2>
+  <p>Built by <code>drivers/build_spectral_sequence.py</code>, <code>drivers/fit_empirical.py</code>
+  and <code>drivers/run_umap.py</code> under <code>&lt;run&gt;/ml</code>; see
+  <code>apps/sx-ml/README.md</code>.</p>
+</div>
+<script>
+fetch("api/meta").then(r => r.json()).then(m => {
+  document.getElementById("meta").textContent =
+    `${m.n.toLocaleString()} stars · embeddings: ${m.embeddings.map(e => e.name).join(", ") || "none yet"} · ${m.run_dir}`;
+});
+</script>
+</body>
+</html>

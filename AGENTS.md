@@ -9,6 +9,12 @@ implements a fast and flexible simple aperture photometry pipeline for the
 SPHEREx images, and custom visualization data products useful for exoplanet and
 stellar astronomy.
 
+Before looking for data on disk, read `LLM_CONTEXT/` (start with
+`LLM_CONTEXT/data_products.md`): it lists where the bulk SPHEREx spectral
+archives, image mirror and index live on wh3, how to pull a spectrum out of
+them, and the caveats.  Keep those notes current when runs are added or
+completed.
+
 --------------------
 CODING:
 

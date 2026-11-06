@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sx-ml · spectral sequence</title>
+<link rel="stylesheet" href="styles.css">
+<script src="vendor/plotly.min.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <h1>sx-ml</h1>
+  <span class="nav"><a href="index.html">home</a><a href="umap.html">UMAP explorer</a><a href="sequence.html"><b>spectral sequence</b></a></span>
+  <span class="muted small" id="status">loading…</span>
+  <span style="flex:1"></span>
+  <span class="small muted">←/→ step · <b>p</b> play · click the sequence image to jump</span>
+</div>
+<div class="seq-layout">
+  <div class="sidebar">
+    <h3>Position</h3>
+    <div class="readout"><span id="teffval">—</span> K</div>
+    <div class="small muted">t = <span id="tval">—</span> · arc = <span id="arcval">—</span></div>
+    <label>slider spacing</label>
+    <select id="mode">
+      <option value="arc">arc length (equal spectral change)</option>
+      <option value="t">t (equal number of stars)</option>
+      <option value="teff">Teff (mapped from TARS)</option>
+    </select>
+    <input id="pos" class="slider-big" type="range" min="0" max="1" step="0.001" value="0.5">
+    <div class="row small muted"><span id="poslo">hot</span><span style="text-align:right" id="poshi">cool</span></div>
+    <h3>Second parameter</h3>
+    <label>first residual eigenvector amplitude: <span id="a1val">0</span> × rms</label>
+    <input id="a1" class="slider-big" type="range" min="-3" max="3" step="0.1" value="0">
+    <div class="small muted" id="a1note"></div>
+    <h3>Display</h3>
+    <label><input id="showabs" type="checkbox"> absolute flux at 10 pc</label>
+    <label><input id="showband" type="checkbox" checked> ±1σ population band</label>
+    <label><input id="showmodel" type="checkbox" checked> model atmosphere at mapped Teff</label>
+    <label><input id="showex" type="checkbox" checked> example stars (<input id="nex" type="number" value="8" min="0" max="40" style="width:50px">)</label>
+    <label><input id="showghost" type="checkbox"> neighbouring templates</label>
+    <label><input id="linear" type="checkbox"> linear flux axis</label>
+    <button id="reshuffle">other examples</button>
+    <h3>At this position</h3>
+    <table class="kv" id="nodeinfo"></table>
+    <h3>Examples</h3>
+    <div id="exlist" class="small"></div>
+  </div>
+  <div class="seq-main">
+    <div class="seq-grid">
+      <div id="main" class="plot tall wide"></div>
+      <div id="ratio" class="plot"></div>
+      <div id="image" class="plot"></div>
+      <div id="mapping" class="plot"></div>
+      <div id="scatterplot" class="plot"></div>
+    </div>
+  </div>
+</div>
+<script src="sequence.js"></script>
+</body>
+</html>

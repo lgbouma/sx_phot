@@ -138,3 +138,24 @@ def test_fit_band_clips_outlier() -> None:
 
     outlier_pos = np.where(res.input_indices == outlier_idx)[0][0]
     assert not res.fit_mask[outlier_pos]
+
+
+def test_skip_failed_bands_keeps_other_bands():
+    import numpy as np
+    import pytest
+    from sx_phot.splinefit import fit_spherex_spectrum_bspline
+
+    rng = np.random.default_rng(1)
+    lam = np.sort(rng.uniform(0.75, 2.4, 300))  # bands 1-3 only
+    flux = 0.01 * lam ** -1.5
+    err = 0.02 * flux
+    with pytest.raises(ValueError):
+        fit_spherex_spectrum_bspline(lam, lam / 40, flux, err)
+    model, fit_mask, dense_w, dense_m, bands = fit_spherex_spectrum_bspline(
+        lam, lam / 40, flux, err, skip_failed_bands=True)
+    assert set(bands) == {"band1", "band2", "band3"}
+    assert np.isfinite(model).sum() == lam.size
+    assert fit_mask.sum() > 250
+    with pytest.raises(ValueError):
+        fit_spherex_spectrum_bspline(lam[:2], lam[:2] / 40, flux[:2],
+                                     err[:2], skip_failed_bands=True)

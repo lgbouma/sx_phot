@@ -11,6 +11,8 @@ RUN_DIR=${RUN_DIR:-/ar0/SPHEREX/bulkphot/tars_v0}
 NPROC=${NPROC:-64}
 OBSCORE_CSV=${OBSCORE_CSV:-}   # set to reuse a snapshot instead of fetching
 EXTRA=${EXTRA:-}               # extra args for run_bulk_phot.py
+STARS_PER_BUCKET=${STARS_PER_BUCKET:-1024}  # gather bucket size (2^n)
+GATHER_NPROC=${GATHER_NPROC:-4}  # gather stage-2 workers (~10 GB each)
 
 mkdir -p "$RUN_DIR"
 LOG="$RUN_DIR/pipeline_$(date +%Y%m%d_%H%M%S).log"
@@ -31,6 +33,7 @@ fi
   "$PY" "$REPO/drivers/run_bulk_phot.py" --catalog "$CATALOG" \
     --run-dir "$RUN_DIR" --nproc "$NPROC" $EXTRA
   echo "[$(date '+%F %T')] 3) gather by star"
-  "$PY" "$REPO/drivers/gather_bulk_phot.py" --run-dir "$RUN_DIR"
+  "$PY" "$REPO/drivers/gather_bulk_phot.py" --run-dir "$RUN_DIR" \
+    --stars-per-bucket "$STARS_PER_BUCKET" --nproc "$GATHER_NPROC"
   echo "[$(date '+%F %T')] done"
 } >> "$LOG" 2>&1

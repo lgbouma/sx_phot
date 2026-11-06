@@ -396,6 +396,12 @@ def index_from_headers(
     return df.reset_index(drop=True)
 
 
+def latest_obscore_snapshot(index_dir: Path) -> Optional[Path]:
+    """Return the newest ``obscore_<stamp>.csv`` in ``index_dir`` or None."""
+    found = sorted(Path(index_dir).glob("obscore_*.csv"))
+    return found[-1] if found else None
+
+
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
@@ -429,9 +435,19 @@ def build_image_index(
 
     if obscore_csv is None and fetch:
         stamp = datetime.now().strftime("%Y%m%d")
-        obscore_csv = fetch_obscore_snapshot(
-            out_parquet.parent / f"obscore_{stamp}.csv"
-        )
+        try:
+            obscore_csv = fetch_obscore_snapshot(
+                out_parquet.parent / f"obscore_{stamp}.csv"
+            )
+        except Exception as exc:  # network / 5xx: fall back to a snapshot
+            obscore_csv = latest_obscore_snapshot(out_parquet.parent)
+            if obscore_csv is None:
+                raise
+            log.warning(
+                "ObsCore fetch failed (%s); reusing %s. Files missing "
+                "from it are indexed from their headers.",
+                exc, obscore_csv,
+            )
     obs = (
         parse_obscore_snapshot(obscore_csv)
         if obscore_csv is not None

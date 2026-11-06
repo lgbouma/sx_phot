@@ -60,3 +60,26 @@ def test_plot_simple_spectrum_writes() -> None:
 
     plt.close(fig)
     assert outpath.exists()
+
+
+def test_cutout_inset_has_asinh_stretch_and_colorbar():
+    """The inset uses an asinh stretch and adds a labelled colorbar."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from astropy.visualization import AsinhStretch
+
+    from sx_phot.visualization import _add_cutout_inset
+
+    rng = np.random.default_rng(0)
+    img = rng.normal(1.0, 0.1, (64, 64))
+    img[30, 30] = 500.0
+    fig, ax = plt.subplots()
+    _add_cutout_inset(fig, ax, img, 0.93, None, 10.0, 20.0, 2.0)
+    assert len(fig.axes) == 3  # host, inset image, colorbar
+    im = fig.axes[1].images[0]
+    assert isinstance(im.norm.stretch, AsinhStretch)
+    assert im.norm.vmax > 100.0
+    assert fig.axes[2].get_ylabel() == "MJy/sr"
+    plt.close(fig)

@@ -92,7 +92,14 @@ Bulk photometry wrapper
 run_bulk_phot_tars.sh: index -> run_bulk_phot.py -> gather for the TARS
   catalog.  Env knobs: CATALOG, RUN_DIR (default
   /ar0/SPHEREX/bulkphot/tars_v0), NPROC (64), OBSCORE_CSV (reuse a
-  snapshot instead of fetching), EXTRA (extra run_bulk_phot.py args).
+  snapshot instead of fetching; if the IRSA fetch fails the newest
+  /ar0/SPHEREX/index/obscore_*.csv is used automatically), EXTRA (extra
+  run_bulk_phot.py args), STARS_PER_BUCKET (gather bucket size, 1024),
+  GATHER_NPROC (gather stage-2 workers, 4, ~10 GB each).
+  Other catalogs: e.g. TARS table 4 (7.48M unique stars; the Zenodo
+  feather has one row per TIC/sector, so a de-duplicated parquet is used)
+    CATALOG=/ar0/local/TARS/zenodo_19917941/tars_table_4_unique_stars.parquet \
+    RUN_DIR=/ar0/SPHEREX/bulkphot/tars4_v0 scripts/run_bulk_phot_tars.sh
   Takes a flock on $RUN_DIR/.lock; safe to re-run daily after the image
   download: only new files are photometered and the buckets are rebuilt.
   Logs: $RUN_DIR/pipeline_<stamp>.log and $RUN_DIR/run_bulk_phot.log.
