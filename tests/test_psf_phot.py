@@ -279,3 +279,42 @@ def test_query_split_halves_at_row_limit(monkeypatch, tmp_path: Path):
     res = gf._query_split(cat, 80.0, tmp_path / "u.xml", 1, max_rows=100)
     assert len(res) == 8 * 30
     assert calls[0] == 8 and min(calls) == 2
+
+
+def _epsf_hdul(sigma_samples: float = 4.0) -> fits.HDUList:
+    """One-zone qr3-style EPSF table: Gaussian, 33 x 33 at 0.2 px."""
+    yy, xx = np.mgrid[0:33, 0:33] - 16.0
+    p = np.exp(-0.5 * (xx ** 2 + yy ** 2) / sigma_samples ** 2)
+    p /= p.sum()
+    cols = [
+        fits.Column(name="XCENTER", format="E", array=np.array([1020.0])),
+        fits.Column(name="YCENTER", format="E", array=np.array([1020.0])),
+        fits.Column(name="EPSF", format=f"{33 * 33}E", dim="(33,33)",
+                    array=p[None].astype(np.float32)),
+    ]
+    hdu = fits.BinTableHDU.from_columns(cols, name="EPSF")
+    hdu.header["OVSMPX"] = 5
+    hdu.header["OVSMPY"] = 5
+    return fits.HDUList([fits.PrimaryHDU(), hdu])
+
+
+def test_epsf_stamp_is_point_sampled():
+    """An effective PSF is sampled at pixel centres, not block-summed."""
+    hdul = _epsf_hdul()
+    z = ZonePsf(hdul)
+    p = np.asarray(hdul["EPSF"].data["EPSF"][0], float)
+    assert z.kind == "table" and z.o == 5 and z.reach == 2
+    st = z.stamp(0, 0.0, 0.0)
+    want = p[16 - 10:16 + 11:5, 16 - 10:16 + 11:5] * 25.0
+    assert st.shape == (5, 5)
+    assert np.allclose(st, want, rtol=0, atol=1e-6 * want.max())
+    assert st.sum() == pytest.approx(z.psum(0), rel=2e-2)
+    # a shift of +1 px moves the peak by one pixel
+    st1 = z.stamp(0, 1.0, 0.0)
+    assert np.allclose(st1[:, 1:], st[:, :-1], atol=1e-6 * want.max())
+    # the cube path still block-sums (its stamp at zero offset is an
+    # interpolation between half-sample shifts, hence the tolerance)
+    zc = ZonePsf(_psf_hdul())
+    pc = np.asarray(_psf_hdul()["PSF"].data[0], float)
+    assert zc.stamp(0, 0.0, 0.0)[4, 4] == pytest.approx(
+        pc[45:55, 45:55].sum(), rel=1e-2)

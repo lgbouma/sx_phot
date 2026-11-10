@@ -16,7 +16,13 @@ Model choices (validated on SPYGLASS VII-A and Cep-Her/CMaN stars):
 * The zone PSF nearest to the target is used for every source in the
   box.  It is rendered by shifting the oversampled PSF on its own grid
   so that the samples fall symmetrically inside detector pixels, then
-  block-summing.  Stamps at integer sample shifts are cached per zone
+  block-summing (qr2 'PSF' cube, an oversampled instrumental PSF) or
+  taking the sample at each pixel centre (qr3 'EPSF' table, an
+  effective PSF that already includes the pixel response).  Treating
+  the EPSF like the cube broadened the model: chi2/nu 5.4 instead of
+  2.5 and qr3 fluxes 6% above qr2 for the same stars (2026-11-10,
+  5,444 star-rows); point sampling gives 1.002, matching the aperture
+  ratio 0.992.  Stamps at integer sample shifts are cached per zone
   and interpolated with 4-point (cubic Lagrange) weights in the
   fractional shift, which matches a cubic-spline shift of the
   oversampled PSF to about 1e-4 of the stamp peak.
@@ -189,8 +195,10 @@ class ZonePsf:
     """Zone PSFs of one Level-2 image with cached pixel stamps.
 
     Handles the qr2 'PSF' image cube (121 zones of 101 x 101 at 0.1 px,
-    zone centres 1-based in the header) and the qr3 'EPSF' table (441
-    zones of 33 x 33 at 0.2 px, zone centres 0-based).
+    zone centres 1-based in the header; pixels are block sums of the
+    samples) and the qr3 'EPSF' table (441 zones of 33 x 33 at 0.2 px,
+    zone centres 0-based; an effective PSF, so pixels take the sample
+    at their centre).
 
     Args:
         hdul: Open Level-2 HDUList.
@@ -256,15 +264,29 @@ class ZonePsf:
         return self._psum[zone]
 
     def _int_stamp(self, zone: int, sy: int, sx: int) -> np.ndarray:
-        """Block-summed stamp for an integer shift (sy, sx) in samples."""
+        """Pixel stamp for an integer shift (sy, sx) in samples.
+
+        The qr2 cube is an oversampled instrumental PSF, so each pixel
+        is the sum of its o x o samples.  The qr3 EPSF is an effective
+        PSF (already integrated over the pixel), so each pixel takes the
+        sample at its centre, scaled by o^2 to keep the stamp sum equal
+        to the sample sum.
+        """
         key = (zone, sy, sx)
         if key not in self._stamps:
             pp = self._load(zone)
             o, n = self.o, 2 * self.reach + 1
             a = self.k0 - sy + self.pad
             b = self.k0 - sx + self.pad
-            win = pp[a:a + o * n, b:b + o * n]
-            self._stamps[key] = win.reshape(n, o, n, o).sum(axis=(1, 3))
+            blk = pp[a:a + o * n, b:b + o * n].reshape(n, o, n, o)
+            if self.kind == "cube":
+                stamp = blk.sum(axis=(1, 3))
+            elif o % 2:
+                stamp = blk[:, o // 2, :, o // 2] * (o * o)
+            else:
+                c = slice(o // 2 - 1, o // 2 + 1)
+                stamp = blk[:, c, :, c].mean(axis=(1, 3)) * (o * o)
+            self._stamps[key] = stamp
         return self._stamps[key]
 
     def stamp(self, zone: int, fx: float, fy: float) -> np.ndarray:
