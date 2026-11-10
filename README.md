@@ -1,6 +1,9 @@
 # sx_phot
 
-Minimal SPHEREx circular-aperture photometry utilities and driver.
+[![tests](https://github.com/lgbouma/sx_phot/actions/workflows/tests.yml/badge.svg)](https://github.com/lgbouma/sx_phot/actions/workflows/tests.yml)
+
+SPHEREx photometry utilities and drivers: circular-aperture photometry,
+plus forced PSF-fitting photometry (`sx_phot/psf_phot.py`, `--psf`).
 
 ## Install
 - Install: `python -m pip install .`

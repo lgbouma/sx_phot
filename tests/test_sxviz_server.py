@@ -72,6 +72,10 @@ def viz_build(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def data(viz_build):
+    from sx_phot.sedmodels import SPHINX_DIR
+
+    if not any(SPHINX_DIR.glob("Teff_*.txt")):
+        pytest.skip("SPHINX model grid not on this host")
     return server.Data(viz_build, None, viz_build / "tars.feather")
 
 
