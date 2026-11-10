@@ -16,7 +16,10 @@ dependencies = [
   "requests",
   "astroquery",
   "pyarrow",
-  "aesthetic",
+  "scipy",
+  "astropy-healpix",
+  "pillow",
+  "aesthetic>=0.11",
   "pytest"
 ]
 
