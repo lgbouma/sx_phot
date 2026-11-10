@@ -1,5 +1,6 @@
 *egg-info*
 data*
+!LLM_CONTEXT/**
 results*
 doc*
 *pycache*

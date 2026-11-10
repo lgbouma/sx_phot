@@ -1,5 +1,21 @@
 DONE (running history; see TODO.txt for the roadmap)
 
+2026-11-10  PR #1 (Gaia-forced PSF photometry, F. Perez Paolino) merged;
+  follow-ups: (a) qr3 PSF fluxes were 6% above qr2 because the qr3
+  EPSF, an effective PSF, was block-summed like the qr2 oversampled
+  cube; ZonePsf now point-samples it.  On 25 qr3 images of the
+  SPYGLASS-IV run (5,444 star-rows with a qr2 fit of the same star in
+  the same 0.1 um bin) chi2/nu drops 5.4 -> 2.5 (better in 93% of
+  rows) and the qr3/qr2 PSF ratio goes 1.060 -> 1.002 (aperture
+  0.992); the same change on qr2 makes chi2 worse (4.0 -> 10.4), so
+  each product keeps its own sampling.  (b) IRSA's '+psffix1' files
+  differ from the mirror only in the header (verified byte for byte on
+  one S3 copy); sx_phot/psf_header_fix.py + drivers/fix_psf_headers.py
+  repair the 870,957 affected mirror files in place (not yet run).
+  (c) local slim Gaia DR3 copy started (sx_phot/gaia_slim.py,
+  drivers/fetch_gaia_slim.py, Heidelberg TAP; cone reader with tests).
+  (d) spyglass_full_psf run documented in LLM_CONTEXT.
+
 2026-11-06  Gaia-forced PSF photometry as an opt-in bulk_phot mode
   (Facundo Perez Paolino; branch forced-psf): sx_phot/psf_phot.py (all
   Gaia DR3 sources whose PSF reaches an 11 x 11 px box fitted at their
@@ -269,3 +285,86 @@ DONE (running history; see TODO.txt for the roadmap)
   17.8 GB measured).  The store now keeps an LRU of max_open=64 handles
   (a cold open plus read costs ~70 ms) and prewarm respects the cap.
   Takes effect when the sx-viz server is restarted.
+
+2026-11-06  sx-ml UMAP page: Gaia CMD panel (apps/sx-ml/hrpanel.js).
+  Lower left of umap.html: M_G0 vs BP-RP0 of the shown stars as a
+  log-density image re-binned at every redraw (2 px cells), the
+  running-median main sequence (dashed, served in /api/meta as
+  mainseq from specml.main_sequence_curve) and the equal-mass line
+  0.75 mag above it.  The loaded star has the same red crosshair as the
+  map, lasso selections are drawn as points, and the panel supports the
+  map's interactions (pan, wheel zoom, shift+drag lasso that selects
+  in the CMD, click to load the nearest shown star, double click to
+  reset); "mean colour" colours cells by the mean of the colour column.
+  scatter.js now exports GridIndex (anisotropic nearest-point and
+  polygon queries) and the marker drawing, shared by both panels.
+  Verified with headless Firefox: synthetic click, wheel and lasso
+  events in the CMD load a star, zoom the view and select 222,781
+  stars that show up in the map and the selection statistics.
+
+2026-11-06  sx-ml: several datasets per server (apps/sx-ml/datasets.json,
+  --datasets; every endpoint takes ?ds=).  umap.html has a Sample
+  switch (TARS Prot detected = table 2, All T<16 d<500 pc targets =
+  table 4) that keeps the embedding, colour column, filter and star
+  across the switch; sx-viz links only for stars sx-viz has.  Datasets
+  whose products are missing are shown as "(building)" and loaded by a
+  watcher thread once the files are complete and 10 min old; rebuilt
+  products are reloaded the same way, so refreshes need no restart.
+  Served floats are float32 (half the memory for 7.5M-row tables);
+  percentiles come from a 1M subsample.  Tests: test_datasets,
+  test_load_datasets_skips_missing, test_main_sequence_curve.
+
+2026-11-06  TARS table 4 star catalog: /ar0/local/TARS/zenodo_19917941/
+  tars_table_4_stars.parquet (sx_phot/tars_catalog.py,
+  drivers/make_tars4_catalog.py; 7,481,030 stars, 38 columns, 3 min).
+  The published table 4 is per (TICID, sector) with the Gaia columns
+  repeated; the de-duplicated list used for the bulk run has no Gaia
+  columns.  The star table takes the lowest-sector row, the sector
+  minimum of num_contams as final_n_contams (table 2's definition:
+  99.95% of the shared stars agree; the maximum agrees for 41%), the
+  sector maxima as num_contams_max / contamratio, n_secs_table4, and
+  joins the table 2 rotation columns with in_table2.  All 7.48M stars
+  have parallax, BP-RP0, M_G0, A0, RUWE and Teff.
+
+2026-11-06  tars4_v0 viz + ML pipeline launched: build_viz_products.py
+  (48 workers, systemd-run 120 GB cap, no swap; ~2.3 buckets/s, so
+  ~55 min for 7306 buckets plus finalize; build_bucket now caches the
+  run catalog per worker instead of re-reading 300 MB per bucket) and
+  scripts/run_tars4_ml.sh (waits for viz.json, fit_empirical.py with
+  48 workers, run_umap.py shape + resid in parallel with 24 numba
+  threads each; the table 2 library copied into tars4_v0/ml with
+  sequence_provenance.txt).
+
+2026-11-06  tars4_v0 viz + ML products complete.  Viz build: 7306
+  buckets, 0 failures, 46 min + 8 min finalize, 243 GB
+  (/ar0/SPHEREX/bulkphot/tars4_v0/viz; binned arrays 7,481,030 x 76).
+  Fits: 7,252,919 of 7,481,030 stars fitted, median chi2/dof 1.29
+  (1.39 for table 2), 45 min with 48 workers (empfit.parquet 674 MB).
+  UMAP: 7,106,886 stars embedded (n_bins >= 40, S/N >= 10); shape
+  47 min and resid 35 min in parallel with 24 numba threads each (shape
+  PCA: 88% in PC1; resid: 25%, 19%, 7%).  Whole chain 1 h 33 min after
+  the viz build started; peak unit memory ~60 GB.  sx-ml serves it as
+  dataset tars4 (datasets.json) next to the table 2 rotators.
+
+2026-11-06  sx-ml UMAP page polish: colourbar canvas kept in flow (the
+  .plotwrap canvas rule had made it absolute, so the 180 px bar
+  overflowed the label box onto the right column for short column
+  names); shape embedding is the default; the Sample section is hidden
+  unless two datasets are ready; star title drops the row id, links
+  read "sx-viz page" and "tar-viz page" (lcviz.lgbouma.com:8056,
+  SX_TARVIZ_URL), both only for the TARS rotators.
+
+2026-11-10  sx-viz star page, round 4 (less noise, north-up cutouts).
+  SPHEREx cutouts are resampled to north up, east left through the image
+  WCS at the native 6.1"/px (sx_phot.viz_report.sky_cutout; the local
+  Jacobian of the SIP WCS, nearest-pixel resampling, N/E compass), with
+  a three-band colour stack (0.85 / 1.8 / 4.3 um, /api/spxrgb) next to
+  the sky tile.  The report PNG gains DSS2 red and the SPHEREx stack in
+  place of the phase-folded panel and draws the lowest-BIC model thick.
+  Page: verdict buttons and keys 1-4/0 removed (notes kept; the table
+  column shows notes), log flux-ratio rows dropped from the spectrum
+  summary, DSS2 IR dropped, the TARS vetting image and the cutouts share
+  one row below the ratio plot (half width each), and the preferred SED
+  model is drawn thick (components dotted) in both plotly panels and
+  marked in the model table.  Stale spherex/ and reports/ caches under
+  tars_v0/viz/cutouts were removed (cache dir is now spherex_nup/).

@@ -41,6 +41,19 @@ query_gaia_neighbours.py: Gaia DR3 sources within 80" of every catalog
   star (TAP upload join, chunked and resumable; chunks that hit the
   archive's 50,000-row limit are split) -> the --neighbours parquet for
   run_bulk_phot.py --psf.  Use the same catalog options as the run.
+fetch_gaia_slim.py: Build the local slim Gaia DR3 copy
+  (/ar0/local/gaia_dr3_slim: source_id, ra, dec, pmra, pmdec, G for all
+  1.81e9 sources) from the Heidelberg ARI TAP mirror, 10M rows per job
+  in source_id order, resumable from manifest.csv (sx_phot/gaia_slim.py).
+  Parts are HEALPix-ordered through source_id, so
+  sx_phot.gaia_slim.GaiaSlim(dir).cone(ra, dec, r_arcsec) reads only
+  the row groups that can hold the cone.  Run under the systemd-run cap.
+fix_psf_headers.py: Repair the IRSA PSF zone-header error (pipeline
+  6.4-6.5.5, VERSION without '+psffix1') in the L2 mirror in place:
+  XCTR_i/YCTR_i and XWID_i/YWID_i exchanged, VERSION suffixed, nothing
+  else touched (sx_phot/psf_header_fix.py; byte-identical to IRSA's
+  fixed S3 copy).  --dry-run and --limit first; idempotent; do not run
+  while photometry jobs read the mirror.
 gather_bulk_phot.py: Regroup the rows by star into <run-dir>/bystar/
   bucket=<N>/ (1024 stars per bucket; rows sorted by star_idx).  Two
   stages so memory stays bounded for any bucket count: --nproc workers

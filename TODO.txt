@@ -10,19 +10,39 @@ In flight
       in crowded young-star fields (median 23 Gaia components per box),
       i.e. ~4-5 days on 76 cores for the 3.6B tars4 rows.  Profile and
       vectorise the stamp rendering before any TARS-scale PSF run.
-  [ ] PSF mode neighbour lists come from per-run Gaia TAP queries
-      (~8 s per 300 stars, 50,000-row limit per job); a local slim Gaia
-      DR3 copy (ra, dec, pm, G) would be needed for TARS-scale lists.
-  [ ] The local L2 mirror holds qr2 files with the IRSA PSF header
-      error (VERSION 6.4-6.5.5 without '+psffix1'; zone x/y swapped,
-      up to 5% in PSF photometry).  psf_phot corrects it on read;
-      anything else that reads the PSF extension from the mirror must
-      too (or re-download those files).
+  [ ] local slim Gaia DR3 copy for PSF neighbour lists: being fetched
+      since 2026-11-10 into /ar0/local/gaia_dr3_slim (unit sx-gaia-slim;
+      drivers/fetch_gaia_slim.py, Heidelberg ARI TAP, 10M rows per job
+      in source_id order; part 0: 10M rows in 273 s, 389 MB, so ~14 h
+      and ~70 GB for 1.81e9 sources; the ESA CDN is IPv6-only and unreachable from wh3).
+      sx_phot.gaia_slim.GaiaSlim.cone works on the parts (brute-force
+      checked) at ~0.2 s per cone with 512k-row row groups; parts now
+      use 65k rows.  Still to do: a vectorised neighbour builder
+      (targets sorted by HEALPix, one pass per part) to replace
+      drivers/query_gaia_neighbours.py for TARS-scale lists.
+  [ ] The local L2 mirror holds 870,957 qr2 files (2025W17-2026W06,
+      l2b-v20..v23, VERSION 6.4-6.5.5, 62 TB) with the IRSA PSF header
+      error; psf_phot corrects it on read.  The in-place repair is
+      ready (sx_phot/psf_header_fix.py, drivers/fix_psf_headers.py;
+      patched copy byte-identical to IRSA's fixed S3 file; dry run of
+      2000 files at 17 ms each, so ~4 h with 4 workers) but has NOT
+      been run on the mirror: run it when no photometry job is reading
+      the mirror, under the systemd-run cap, then psf_phot's reader fix
+      becomes a no-op.  Files from 6.5.6 on (2026W07 onward) are
+      unaffected.
   [ ] PSF mode reads whole images, as the aperture path does; for
       sparse target lists, memory-mapped box reads would be faster.
-  [ ] tars4_v0 is complete (2026-11-05; see DONE.txt).  Decide when to
-      switch the viewer, viz and ml products from tars_v0 to tars4_v0
-      (7x the stars; viz build time scales accordingly).
+  [ ] PSF mode on qr3 (fixed 2026-11-10, see DONE.txt): the EPSF is
+      now point-sampled.  Remaining: re-run the SPYGLASS-IV qr3 shards
+      with the fix (stored qr3 psf_* rows in
+      /ar0/PROJ/fperezpa/spyglass_full_psf/run_psf are 6% high), and
+      check the qr3 SHIFT0 (0, 0) sub-pixel offset the way the qr2
+      value was derived (median of free fits at S/N > 10).
+  [ ] tars4_v0 viz + ml products are being built (2026-11-06; sx-ml
+      serves both runs via datasets.json).  Still open: switch sx-viz
+      (star pages, SED fits) to tars4_v0, or add it as a second run there
+      too; decide whether tars_v0 keeps being refreshed at all (table 2
+      is a subset of table 4).
   [ ] cap memory in scripts/run_bulk_phot_tars.sh too: run the gather
       (and ideally the photometry) via systemd-run --user -p MemoryMax=
       -p MemorySwapMax=0 so a leak can never push the host into swap.
@@ -69,18 +89,31 @@ SED fits (sx_phot/sedmodels.py, sedfit.py), per-star products
       fixing them.
   [ ] TESS light curves (/ar0/local/TARS/tess_lcs) are not shown on the
       star page; the lcviz previews are the only TESS view (one sector
-      at a time).  The SPHEREx flux/spline-vs-phase plotly panel was
-      dropped on 2026-11-04 (still in the report PNG).
-  [ ] viz products for tars4_v0 once it is gathered (same drivers;
-      summary.parquet would be 7.5M rows, so the table query arrays need
-      ~2 GB; fine on wh3).
+      at a time).  The SPHEREx flux/spline-vs-phase panel was dropped
+      from the plotly page on 2026-11-04 and from the report PNG on
+      2026-11-10 (the flux/spline time series remains in the report).
+  [ ] sx-viz for tars4_v0: the viz build is being made (2026-11-06);
+      the SED fits (fit_viz_seds.py, ~10 min per 1M stars) and the
+      7.5M-row table arrays (~2 GB) are still to do, then serve it (second
+      run dir or a switch).
 
 sx-ml (apps/sx-ml; README there): empirical spectral sequence
 (sx_phot/specml.py), template fits (sx_phot/empfit.py), UMAP
 (drivers/run_umap.py), UMAP explorer + sequence slider (port 8052).
   [ ] install the cron lines from apps/sx-ml/README.md (ensure_server.sh,
       port 8052); rebuild sequence -> fits -> UMAP after each viz refresh
-      (fold into apps/sx-viz/scripts/refresh_products.sh).
+      (fold into apps/sx-viz/scripts/refresh_products.sh); the server
+      reloads rebuilt products by itself when run with --datasets.
+  [ ] restarting the sx-viz / sx-ml servers needs the user (the agent's
+      kill is blocked); consider a /api/shutdown or a systemd --user unit
+      so ensure_server.sh can replace a running server.
+  [ ] UMAP page, Gaia CMD panel: possible additions are a second CMD
+      colour (e.g. a column other than the map colour), a full-table-4
+      density backdrop behind the table 2 sample, and an inverse hover
+      (hovering the CMD marks the star in the map).
+  [ ] table 4 ML: the table 2 library is used unchanged; rebuilding the
+      sequence on table 4 (7x the clean training stars, better-sampled
+      ends) is an option, but changes the t scale of every product.
   [ ] band-6 residuals depend on magnitude at fixed t (median +0.8% at
       Tmag 10 to -2.1% at Tmag 15 for K dwarfs, +1.8% to -2.1% for M
       dwarfs; results/sx_ml_analysis/excess_vs_tmag.png): a background
