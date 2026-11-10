@@ -11,7 +11,7 @@ In flight
       i.e. ~4-5 days on 76 cores for the 3.6B tars4 rows.  Profile and
       vectorise the stamp rendering before any TARS-scale PSF run.
   [ ] local slim Gaia DR3 copy for PSF neighbour lists: being fetched
-      since 2026-11-10 into /ar0/local/gaia_dr3_slim (unit sx-gaia-slim;
+      since 2026-11-10 into /ar0/GAIA/gaia_dr3_slim (unit sx-gaia-slim;
       drivers/fetch_gaia_slim.py, Heidelberg ARI TAP, 10M rows per job
       in source_id order; part 0: 10M rows in 273 s, 389 MB, so ~14 h
       and ~70 GB for 1.81e9 sources; the ESA CDN is IPv6-only and unreachable from wh3).

@@ -104,7 +104,7 @@ nightly image download to add new weeks).  See `scripts/README.txt`.
 
 ## Gaia DR3 slim copy
 
-`/ar0/local/gaia_dr3_slim/` (fetch started 2026-11-10 09:00, ~14 h; check
+`/ar0/GAIA/gaia_dr3_slim/` (fetch started 2026-11-10 09:00, ~14 h; check
 `manifest.csv` and `fetch.log`): source_id, ra, dec, pmra, pmdec,
 phot_g_mean_mag for all 1.81e9 Gaia DR3 sources as parquet parts
 sorted by source_id (HEALPix order), built by

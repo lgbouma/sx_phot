@@ -42,7 +42,7 @@ query_gaia_neighbours.py: Gaia DR3 sources within 80" of every catalog
   archive's 50,000-row limit are split) -> the --neighbours parquet for
   run_bulk_phot.py --psf.  Use the same catalog options as the run.
 fetch_gaia_slim.py: Build the local slim Gaia DR3 copy
-  (/ar0/local/gaia_dr3_slim: source_id, ra, dec, pmra, pmdec, G for all
+  (/ar0/GAIA/gaia_dr3_slim: source_id, ra, dec, pmra, pmdec, G for all
   1.81e9 sources) from the Heidelberg ARI TAP mirror, 10M rows per job
   in source_id order, resumable from manifest.csv (sx_phot/gaia_slim.py).
   Parts are HEALPix-ordered through source_id, so

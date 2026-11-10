@@ -2,8 +2,8 @@
 """Build the local slim Gaia DR3 copy (sx_phot.gaia_slim).
 
 Usage:
-    python drivers/fetch_gaia_slim.py --out-dir /ar0/local/gaia_dr3_slim \
-        --log-file /ar0/local/gaia_dr3_slim/fetch.log
+    python drivers/fetch_gaia_slim.py --out-dir /ar0/GAIA/gaia_dr3_slim \
+        --log-file /ar0/GAIA/gaia_dr3_slim/fetch.log
 
 Walks gaiadr3.gaia_source at the Heidelberg ARI TAP mirror in
 source_id order, 10M rows per job, one job at a time; resumable.
@@ -22,7 +22,7 @@ from sx_phot.gaia_slim import ARI_TAP, DEFAULT_MAX_ROWS, fetch_all
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--out-dir", default="/ar0/local/gaia_dr3_slim")
+    parser.add_argument("--out-dir", default="/ar0/GAIA/gaia_dr3_slim")
     parser.add_argument("--max-rows", type=int, default=DEFAULT_MAX_ROWS)
     parser.add_argument("--max-parts", type=int, default=None,
                         help="stop after this many new parts (testing)")
