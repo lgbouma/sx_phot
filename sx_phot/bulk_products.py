@@ -22,18 +22,38 @@ from typing import Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from sx_phot.bulk_phot import ROW_DTYPES, TJD_OFFSET
+from sx_phot.bulk_phot import ROW_DTYPES, TJD_OFFSET, PhotConfig, row_dtypes
 from sx_phot.circphot import BITMASK, _format_radec_stub
 from sx_phot.splinefit import fit_spherex_spectrum_bspline
 
 log = logging.getLogger(__name__)
 
 DEFAULT_STARS_PER_BUCKET = 1024
+PSF_LEGACY_EXTRAS = (
+    "psf_status", "psf_flux_jy", "psf_flux_err_jy", "psf_chi2nu",
+    "psf_n_comp", "psf_nb_flux_jy", "psf_apsub_jy", "psf_ap_ee",
+)
 LEGACY_COLUMNS = [
     "wavelength_um", "bandwidth_um", "flux_jy", "flux_err_jy", "file",
     "masked", "quality", "aper_count", "mjd_avg", "tjd_avg", "bkgd_method",
     "aperture_radius_pix", "annulus_r_in_pix", "annulus_r_out_pix",
 ]
+
+
+def run_row_dtypes(run_dir: Path) -> dict:
+    """Return the row dtypes of a run (PSF columns for PSF runs).
+
+    Args:
+        run_dir: Run directory with config.json.
+
+    Returns:
+        Column name to dtype mapping.
+    """
+    path = Path(run_dir) / "config.json"
+    if not path.exists():
+        return dict(ROW_DTYPES)
+    phot = json.loads(path.read_text()).get("phot", {})
+    return row_dtypes(PhotConfig(psf=bool(phot.get("psf", False))))
 
 
 def _split_pass(args: tuple) -> int:
@@ -166,7 +186,7 @@ def gather_by_star(
         if d.exists():
             shutil.rmtree(d)
     group_dir.mkdir()
-    columns = list(ROW_DTYPES)
+    columns = list(run_row_dtypes(run_dir))
     nproc = max(1, int(nproc))
 
     log.info("Gathering %d pass files into %d buckets (%d stars each) "
@@ -263,7 +283,7 @@ def load_star_rows(run_dir: Path, ticid: int) -> pd.DataFrame:
     bucket_dir = run_dir / "bystar" / f"bucket={sidx // spb}"
     if not bucket_dir.exists():
         return pd.DataFrame({k: np.zeros(0, dtype=v)
-                             for k, v in ROW_DTYPES.items()})
+                             for k, v in run_row_dtypes(run_dir).items()})
     dataset = ds.dataset(str(bucket_dir), format="parquet")
     table = dataset.to_table(filter=ds.field("ticid") == int(ticid))
     rows = table.to_pandas()
@@ -303,8 +323,9 @@ def to_legacy_frame(
         "annulus_r_in_pix": float(config["annulus_r_in"]),
         "annulus_r_out_pix": float(config["annulus_r_out"]),
     })
-    for extra in ("flux_raw_jy", "bkg_jy", "zodi_jy", "n_ann_pix",
-                  "bkg_mode", "x", "y", "qr", "image_key"):
+    extras = ("flux_raw_jy", "bkg_jy", "zodi_jy", "n_ann_pix", "bkg_mode",
+              "x", "y", "qr", "image_key") + PSF_LEGACY_EXTRAS
+    for extra in extras:
         if extra in rows.columns:
             out[extra] = rows[extra].to_numpy()
     return out

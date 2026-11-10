@@ -12,6 +12,10 @@ Work is sharded by detector directory (``<week>__<l2b version>__D<n>``);
 each pass over a shard writes ``pass_<stamp>.parquet`` plus the list of
 image keys it processed, so re-running a run directory only processes
 files that arrived since the previous pass.
+
+With ``PhotConfig.psf`` set, every star is also measured by Gaia-forced
+PSF photometry (``sx_phot.psf_phot``), which adds the ``psf_*`` columns
+and needs a Gaia neighbour table (``sx_phot.gaia_field``).
 """
 
 from __future__ import annotations
@@ -43,6 +47,14 @@ from scipy.spatial import cKDTree
 
 from sx_phot.circphot import ARCSEC_PER_PIXEL, BITMASK, TJD_OFFSET
 from sx_phot.image_index import COARSE_RADIUS_DEG, NAXIS, unit_vectors
+from sx_phot.psf_phot import (
+    ARCSEC2_SR,
+    PSF_DTYPES,
+    Neighbours,
+    PsfParams,
+    ZonePsf,
+    fit_image,
+)
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +106,10 @@ class PhotConfig:
         min_file_age_sec: Skip files modified more recently than this
             (protects against reading files still being downloaded).
         epoch_jyear: Catalog coordinate epoch (Julian year).
+        psf: Also run Gaia-forced PSF photometry (adds psf_* columns).
+        psf_drop_frac: Drop PSF neighbours with at most this fraction of
+            their light on usable box pixels (0: only those with none).
+        psf_bg_order: PSF background polynomial (1 plane, 2 quadratic).
     """
 
     aperture_radius: float = 2.0
@@ -108,6 +124,23 @@ class PhotConfig:
     coarse_radius_deg: float = COARSE_RADIUS_DEG
     min_file_age_sec: float = 600.0
     epoch_jyear: float = DEFAULT_EPOCH_JYEAR
+    psf: bool = False
+    psf_drop_frac: float = 0.0
+    psf_bg_order: int = 1
+
+
+def row_dtypes(config: Optional[PhotConfig] = None) -> dict:
+    """Return the output column dtypes for a configuration.
+
+    Args:
+        config: Photometry parameters (None: aperture only).
+
+    Returns:
+        ROW_DTYPES, plus PSF_DTYPES when ``config.psf`` is set.
+    """
+    if config is not None and config.psf:
+        return {**ROW_DTYPES, **PSF_DTYPES}
+    return dict(ROW_DTYPES)
 
 
 def jyear_to_mjd(epoch_jyear: float) -> float:
@@ -147,9 +180,57 @@ def propagate_linear(
     return np.mod(ra, 360.0), dec
 
 
-def _empty_rows() -> dict[str, np.ndarray]:
+def _empty_rows(config: Optional[PhotConfig] = None
+                ) -> dict[str, np.ndarray]:
     """Return an empty row dict with the canonical dtypes."""
-    return {k: np.zeros(0, dtype=v) for k, v in ROW_DTYPES.items()}
+    return {k: np.zeros(0, dtype=v) for k, v in row_dtypes(config).items()}
+
+
+def _psf_columns(
+    hdul: fits.HDUList,
+    img: np.ndarray,
+    flags: np.ndarray,
+    var: np.ndarray,
+    wcs: WCS,
+    mjd: float,
+    sidx: np.ndarray,
+    nb: Neighbours,
+    cfg: PhotConfig,
+) -> dict[str, np.ndarray]:
+    """Forced PSF columns for the stars ``sidx`` on one image.
+
+    Args:
+        hdul: Open Level-2 HDUList.
+        img: IMAGE array.
+        flags: FLAGS array.
+        var: VARIANCE array.
+        wcs: Image WCS.
+        mjd: Image MJD-AVG.
+        sidx: Catalog star_idx of the stars on the image.
+        nb: Gaia neighbour table.
+        cfg: Photometry parameters.
+
+    Returns:
+        Dict of PSF_DTYPES columns aligned with ``sidx``.
+    """
+    sidx = np.asarray(sidx, dtype=np.int64)
+    a, b = nb.offsets[sidx], nb.offsets[sidx + 1]
+    counts = b - a
+    starts = np.zeros(sidx.size + 1, dtype=np.int64)
+    starts[1:] = np.cumsum(counts)
+    rows = np.repeat(a - starts[:-1], counts) + np.arange(starts[-1])
+    targets = np.where(nb.target[sidx] >= 0, nb.target[sidx] - a, -1)
+    ra_t, dec_t = propagate_linear(
+        nb.ra[rows], nb.dec[rows], nb.pmra[rows], nb.pmdec[rows],
+        jyear_to_mjd(2016.0), mjd,
+    )
+    nx, ny = wcs.all_world2pix(ra_t, dec_t, 0, quiet=True)
+    params = PsfParams(drop_frac=float(cfg.psf_drop_frac),
+                       bg_order=int(cfg.psf_bg_order))
+    zpsf = ZonePsf(hdul, reach=params.reach)
+    omega = float(hdul["IMAGE"].header["OMEGA_MEDIAN"]) * ARCSEC2_SR
+    return fit_image(img, flags, var, zpsf, omega, nx, ny, nb.g[rows],
+                     starts, targets, params)
 
 
 def photometer_image(
@@ -161,6 +242,7 @@ def photometer_image(
     star_idx: Optional[np.ndarray] = None,
     ticid: Optional[np.ndarray] = None,
     config: Optional[PhotConfig] = None,
+    neighbours: Optional[Neighbours] = None,
 ) -> tuple[dict[str, np.ndarray], dict]:
     """Measure every given star that falls on one Level-2 image.
 
@@ -173,13 +255,20 @@ def photometer_image(
         star_idx: Catalog row index per star (default arange).
         ticid: Catalog identifier per star (default star_idx).
         config: Photometry parameters.
+        neighbours: Gaia neighbour table indexed by star_idx (required
+            when ``config.psf`` is set).
 
     Returns:
         Tuple (rows, meta).  ``rows`` maps column name to array (one entry
         per star on the image; ``image_key`` is left zero for the caller
         to fill).  ``meta`` holds per-image diagnostics.
+
+    Raises:
+        ValueError: If ``config.psf`` is set without ``neighbours``.
     """
     cfg = config or PhotConfig()
+    if cfg.psf and neighbours is None:
+        raise ValueError("PSF photometry needs a Gaia neighbour table")
     t0 = time.time()
     ra_deg = np.atleast_1d(np.asarray(ra_deg, dtype=float))
     dec_deg = np.atleast_1d(np.asarray(dec_deg, dtype=float))
@@ -193,7 +282,7 @@ def photometer_image(
     if ticid is None:
         ticid = np.asarray(star_idx)
     meta = {"path": path, "n_cand": int(n), "n_in": 0}
-    rows = _empty_rows()
+    rows = _empty_rows(cfg)
     if n == 0:
         meta["elapsed_s"] = time.time() - t0
         return rows, meta
@@ -348,6 +437,14 @@ def photometer_image(
             wave_wcs.sip = None
             lam, dlam = wave_wcs.wcs_pix2world(x, y, 0)
 
+            if cfg.psf:
+                t_psf = time.time()
+                psf_rows = _psf_columns(
+                    hdul, img, flags, var, wcs, mjd_avg,
+                    np.asarray(star_idx)[sel], neighbours, cfg,
+                )
+                meta["psf_s"] = time.time() - t_psf
+
     rows = {
         "star_idx": np.asarray(star_idx)[sel].astype(np.int32),
         "ticid": np.asarray(ticid)[sel].astype(np.int64),
@@ -370,6 +467,8 @@ def photometer_image(
         "bandwidth_um": np.asarray(dlam, float).astype(np.float32),
         "mjd_avg": np.full(n_in, mjd_avg, dtype=np.float64),
     }
+    if cfg.psf:
+        rows.update(psf_rows)
     meta["elapsed_s"] = time.time() - t0
     return rows, meta
 
@@ -435,17 +534,23 @@ def load_catalog(
 _CAT: dict[str, np.ndarray] = {}
 _TREE: Optional[cKDTree] = None
 _CFG: PhotConfig = PhotConfig()
+_NB: Optional[Neighbours] = None
 
 
-def _set_worker_state(catalog: pd.DataFrame, config: PhotConfig) -> None:
-    """Store catalog arrays and the KD-tree in module globals."""
-    global _CAT, _TREE, _CFG
+def _set_worker_state(
+    catalog: pd.DataFrame,
+    config: PhotConfig,
+    neighbours: Optional[Neighbours] = None,
+) -> None:
+    """Store catalog arrays, the KD-tree and neighbours in globals."""
+    global _CAT, _TREE, _CFG, _NB
     _CAT = {
         c: np.ascontiguousarray(catalog[c].to_numpy())
         for c in ("star_idx", "ticid", "ra", "dec", "pmra", "pmdec")
     }
     _TREE = cKDTree(unit_vectors(_CAT["ra"], _CAT["dec"]))
     _CFG = config
+    _NB = neighbours
 
 
 def _work(task: tuple) -> tuple:
@@ -469,7 +574,7 @@ def _work(task: tuple) -> tuple:
             _CAT["ra"][cand], _CAT["dec"][cand],
             _CAT["pmra"][cand], _CAT["pmdec"][cand],
             star_idx=_CAT["star_idx"][cand], ticid=_CAT["ticid"][cand],
-            config=_CFG,
+            config=_CFG, neighbours=_NB,
         )
         rows["image_key"][:] = image_key
         return image_key, rows, meta, None
@@ -486,6 +591,7 @@ def init_run_dir(
     index: pd.DataFrame,
     config: PhotConfig,
     catalog_source: str = "",
+    neighbours_source: str = "",
 ) -> Path:
     """Create or validate a run directory and snapshot its inputs.
 
@@ -496,6 +602,7 @@ def init_run_dir(
         config: Photometry parameters (written once; later calls must
             match the stored values).
         catalog_source: Description of the catalog origin for config.json.
+        neighbours_source: Gaia neighbour table path (PSF runs).
 
     Returns:
         The run directory path.
@@ -514,6 +621,8 @@ def init_run_dir(
         "ticid_sum": int(catalog["ticid"].to_numpy().sum()),
         "phot": asdict(config),
     }
+    if config.psf:
+        cfg["neighbours_source"] = neighbours_source
     if cfg_path.exists():
         old = json.loads(cfg_path.read_text())
         same_cat = (
@@ -522,9 +631,13 @@ def init_run_dir(
         )
         if not same_cat:
             raise ValueError(f"{run_dir} was created with a different catalog")
+        # Keys added after a run was created compare at their defaults,
+        # so older run directories stay valid.
+        defaults = asdict(PhotConfig())
         keys = [k for k in asdict(config) if k != "min_file_age_sec"]
-        diff = {k: (old["phot"].get(k), cfg["phot"][k]) for k in keys
-                if old["phot"].get(k) != cfg["phot"][k]}
+        diff = {k: (old["phot"].get(k, defaults[k]), cfg["phot"][k])
+                for k in keys
+                if old["phot"].get(k, defaults[k]) != cfg["phot"][k]}
         if diff:
             raise ValueError(f"{run_dir} config differs: {diff}")
     else:
@@ -591,6 +704,7 @@ def _write_pass(
     chunks: list[dict[str, np.ndarray]],
     keys_done: list[int],
     summary: dict,
+    dtypes: Optional[dict] = None,
 ) -> int:
     """Write one pass (parquet, keys, summary json) for a shard."""
     import pyarrow as pa
@@ -600,7 +714,7 @@ def _write_pass(
     cols = {
         k: np.concatenate([c[k] for c in chunks]) if chunks
         else np.zeros(0, dtype=v)
-        for k, v in ROW_DTYPES.items()
+        for k, v in (dtypes or ROW_DTYPES).items()
     }
     table = pa.table({k: pa.array(v) for k, v in cols.items()})
     tmp = shard_dir / f"pass_{stamp}.parquet.part"
@@ -625,6 +739,7 @@ def run_bulk_photometry(
     max_shards: Optional[int] = None,
     max_files_per_shard: Optional[int] = None,
     chunksize: int = 2,
+    neighbours: Optional[Neighbours] = None,
 ) -> dict:
     """Run image-centric photometry over all unprocessed local images.
 
@@ -638,11 +753,17 @@ def run_bulk_photometry(
         max_shards: Optional cap on shards processed.
         max_files_per_shard: Optional cap on files per shard (testing).
         chunksize: Pool imap chunk size.
+        neighbours: Gaia neighbour table (required for PSF runs).
 
     Returns:
         Dict with totals (files, rows, failed, elapsed_s).
+
+    Raises:
+        ValueError: If ``config.psf`` is set without ``neighbours``.
     """
     cfg = config or PhotConfig()
+    if cfg.psf and neighbours is None:
+        raise ValueError("PSF photometry needs a Gaia neighbour table")
     run_dir = Path(run_dir)
     plan = plan_shards(run_dir, index, shard_glob, max_shards,
                        max_files_per_shard)
@@ -654,7 +775,7 @@ def run_bulk_photometry(
     if not plan:
         return totals
 
-    _set_worker_state(catalog, cfg)
+    _set_worker_state(catalog, cfg, neighbours)
     ctx = get_context("fork")
     t_start = time.time()
     with ctx.Pool(int(nproc)) as pool:
@@ -670,6 +791,7 @@ def run_bulk_photometry(
             failed: list[tuple[str, str]] = []
             n_recent = 0
             n_in_sum = 0
+            psf_s = 0.0
             for key, rows, meta, err in pool.imap_unordered(
                 _work, tasks, chunksize=chunksize
             ):
@@ -681,6 +803,7 @@ def run_bulk_photometry(
                     continue
                 keys_done.append(int(key))
                 n_in_sum += int(meta.get("n_in", 0))
+                psf_s += float(meta.get("psf_s", 0.0))
                 if rows["star_idx"].size:
                     chunks.append(rows)
             dt = time.time() - t0
@@ -691,8 +814,10 @@ def run_bulk_photometry(
                 "files_per_s": round(len(keys_done) / max(dt, 1e-9), 2),
                 "stats_stride": cfg.stats_stride, "failed": failed[:200],
             }
+            if cfg.psf:
+                summary["psf_cpu_s"] = round(psf_s, 1)
             n_rows = _write_pass(run_dir / "phot" / shard, stamp, chunks,
-                                 keys_done, summary)
+                                 keys_done, summary, row_dtypes(cfg))
             totals["files"] += len(keys_done)
             totals["rows"] += n_rows
             totals["failed"] += len(failed)
@@ -731,5 +856,6 @@ __all__ = [
     "plan_shards",
     "processed_keys",
     "propagate_linear",
+    "row_dtypes",
     "run_bulk_photometry",
 ]

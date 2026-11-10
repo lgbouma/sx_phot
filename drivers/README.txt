@@ -22,6 +22,25 @@ run_bulk_phot.py: Given a star catalog (feather/parquet/CSV with id, ra,
   were left, so the unmasked annulus was used instead (happens at the
   bright LVF band edges, e.g. 1.0-1.1 um, where the global star mask
   flags the whole region); 2 = no finite annulus pixels, background 0.
+  --psf adds Gaia-forced PSF photometry (sx_phot.psf_phot) with the
+  neighbour table given by --neighbours: every Gaia DR3 source whose
+  PSF reaches an 11 x 11 px box is fitted at its propagated position
+  with a free flux, plus a plane background.  Extra columns: psf_status
+  (0 ok, 1 edge, 2 masked core, 3 no Gaia match, 4 fit error, 5 fewer
+  than 20 degrees of freedom left, e.g. >100 sources toward the bulge),
+  psf_flux_jy, psf_flux_err_jy, psf_chi2nu, psf_n_comp, psf_n_drop
+  (neighbours with no light on usable pixels), psf_nb_flux_jy, psf_bkg_mjysr,
+  psf_blend_frac_g (G-band flux of sources merged with the star),
+  psf_min_corr (most negative target-neighbour flux correlation),
+  psf_apsub_jy / psf_apsub_err_jy (2 px aperture after subtracting the
+  fitted neighbours and plane), psf_ap_ee (model fraction of the star's
+  light in that aperture), psf_zone, psf_n_bad_c3.  Old qr2 files
+  (pipeline 6.4-6.5.5 without '+psffix1') have the IRSA PSF zone header
+  error; the zone centres are swapped back automatically.
+query_gaia_neighbours.py: Gaia DR3 sources within 80" of every catalog
+  star (TAP upload join, chunked and resumable; chunks that hit the
+  archive's 50,000-row limit are split) -> the --neighbours parquet for
+  run_bulk_phot.py --psf.  Use the same catalog options as the run.
 gather_bulk_phot.py: Regroup the rows by star into <run-dir>/bystar/
   bucket=<N>/ (1024 stars per bucket; rows sorted by star_idx).  Two
   stages so memory stays bounded for any bucket count: --nproc workers
