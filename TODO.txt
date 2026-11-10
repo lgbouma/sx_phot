@@ -6,6 +6,20 @@ bulk_products.py; drivers/build_image_index.py, run_bulk_phot.py,
 gather_bulk_phot.py, materialize_bulk_star.py; scripts/run_bulk_phot_tars.sh.
 
 In flight
+  [ ] PSF mode (sx_phot/psf_phot.py): costs 8.6 ms CPU per star-image
+      in crowded young-star fields (median 23 Gaia components per box),
+      i.e. ~4-5 days on 76 cores for the 3.6B tars4 rows.  Profile and
+      vectorise the stamp rendering before any TARS-scale PSF run.
+  [ ] PSF mode neighbour lists come from per-run Gaia TAP queries
+      (~8 s per 300 stars, 50,000-row limit per job); a local slim Gaia
+      DR3 copy (ra, dec, pm, G) would be needed for TARS-scale lists.
+  [ ] The local L2 mirror holds qr2 files with the IRSA PSF header
+      error (VERSION 6.4-6.5.5 without '+psffix1'; zone x/y swapped,
+      up to 5% in PSF photometry).  psf_phot corrects it on read;
+      anything else that reads the PSF extension from the mirror must
+      too (or re-download those files).
+  [ ] PSF mode reads whole images, as the aperture path does; for
+      sparse target lists, memory-mapped box reads would be faster.
   [ ] tars4_v0 is complete (2026-11-05; see DONE.txt).  Decide when to
       switch the viewer, viz and ml products from tars_v0 to tars4_v0
       (7x the stars; viz build time scales accordingly).

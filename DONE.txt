@@ -1,5 +1,18 @@
 DONE (running history; see TODO.txt for the roadmap)
 
+2026-11-06  Gaia-forced PSF photometry as an opt-in bulk_phot mode
+  (Facundo Perez Paolino; branch forced-psf): sx_phot/psf_phot.py (all
+  Gaia DR3 sources whose PSF reaches an 11 x 11 px box fitted at their
+  propagated positions with free fluxes plus a plane; IRSA PSF zone
+  header fix for unfixed 6.4-6.5.5 files), sx_phot/gaia_field.py (TAP
+  upload-join neighbour lists, split at the 50,000-row archive limit),
+  run_bulk_phot.py --psf/--neighbours, query_gaia_neighbours.py, psf_*
+  columns carried through gather/materialize, 23 new tests.  On 4
+  shards of the SPYGLASS VII-A list (7816 rows) it reproduces the
+  standalone sxpsf code to 1e-4 in flux (99% of rows within 0.07
+  sigma) with no NaN errors (sxpsf: 7.9% of qr2 rows); 8.6 ms CPU per
+  star per image.
+
 2026-11-02  Bulk SPHEREx photometry for the TARS catalog: built
   sx_phot/image_index.py (ObsCore snapshot + local store -> parquet index
   with decodable image keys; polygon footprint query reproduces IRSA
