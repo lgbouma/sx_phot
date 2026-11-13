@@ -13,6 +13,14 @@ DONE (running history; see TODO.txt for the roadmap)
   GitHub Actions test workflow added (badge in README); tests needing
   wh3 data skip off-host.
 
+2026-11-10  Spline supplement fixed for deep-field stars: the
+  duplicate-wavelength jitter in splinefit.fit_band_bspline (eps * index)
+  pushed the last of ~1e4 points past the end knot ("Out of bounds"),
+  so 9 of 11 SDF/NDF stars tried had no _splsupp.csv; knots now come
+  from the jittered values (regression test added).  materialize_star
+  now skips failed bands (skip_failed_bands=True, as materialize_run
+  and the viz build already did), e.g. WASP-62 with band 1 saturated.
+
 2026-11-10  PR #1 (Gaia-forced PSF photometry, F. Perez Paolino) merged;
   follow-ups: (a) qr3 PSF fluxes were 6% above qr2 because the qr3
   EPSF, an effective PSF, was block-summed like the qr2 oversampled
@@ -381,3 +389,49 @@ DONE (running history; see TODO.txt for the roadmap)
   model is drawn thick (components dotted) in both plotly panels and
   marked in the model table.  Stale spherex/ and reports/ caches under
   tars_v0/viz/cutouts were removed (cache dir is now spherex_nup/).
+
+2026-11-10  sx-viz sky tiles: proper-motion propagation.  DSS2 red/blue
+  tiles now come from the STScI DSS server (plate DATE-OBS in the
+  header), the Gaia 2016.0 position is moved to the plate epoch with
+  pmra/pmdec, and the 3' tile is resampled north-up at 0.6"/px around
+  that position (sx_phot.viz_report.resample_north_up).  A JSON sidecar
+  (/api/cutout?meta=1) carries the epoch and shift; the page labels the
+  tile and marks the 2016.0 position.  SkyView stays as the fallback and
+  for 2MASS / WISE (nominal epochs).  TIC 185617406 (1.7"/yr) was 37"
+  off centre on the 1994 red plate before.  dss2r/dss2ir/dss2b and
+  report caches cleared.
+
+2026-11-11  Deep-field excess noise traced to detector response errors.
+  The 15-25 ppt per-exposure scatter of bright stars (3-5x flux_err_jy)
+  follows detector position: a smooth term per (det, qr) and a
+  pixel-scale term of 9-21 ppt rms.  A first delta-flat solved from
+  tars4_v0 residuals (sparse ridge, 3x3 PSF weights) reduces held-out
+  bright-star scatter to 0.63-0.79x in bands 1-5 (qr2).  Analysis only
+  (results/deepfield_xmatch_20261110/noise/); no pipeline code changed.
+  Ranked per-band, per-season fold figures for the fast TARS rotators
+  are in results/deepfield_xmatch_20261110/tars_folds/.
+
+2026-11-12  Noise model, saturation and ePSF checks (analysis only).
+  Excess scatter in tars4_v0 scales as flux^0.9-1.0 in all six bands;
+  the L2 VARIANCE layer matches a zodi plus read-noise model to ~25%
+  and faint stars reach the quoted errors.  OVERFLOW onset fluxes per
+  band measured.  In-house det 3 ePSF built and compared with the team
+  qr2 cube and qr3 table; the qr3 table needs renormalising in
+  psf_phot (not yet done).  Products in
+  results/deepfield_xmatch_20261110/{noise_model,epsf}/; one-page
+  delta-flat note in docs/deltaflat/.
+
+2026-11-12  psf_phot rescales qr3 EPSF-table stamps to a phase-
+  independent sum (ZonePsf renorm_table, default on).  The delivered
+  table's stamp sum varies 2.1% rms with sub-pixel position; on 46
+  held-out bright det 3 stars the qr3 per-visit PSF scatter falls from
+  32.6 to 21.0 ppt (aperture 19.8), median flux changes by +0.07%.
+  Existing PSF runs are not updated.  TARS fold figures remade with
+  one y-range per star (tars_folds/png_fixedy/).
+
+2026-11-12  Delta-flat pixel term decomposed (analysis only,
+  results/deepfield_xmatch_20261110/noise/stripe/).  17-54% of its
+  reproducible variance is linear in the public QR2->QR3 flux
+  correction; a multiplicative row/column line term (up to 30% in
+  det 3) persists in qr3; converged det 4/5 maps reach held-out
+  ratios 0.718 and 0.619.

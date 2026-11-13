@@ -30,6 +30,7 @@ anything else large) under `systemd-run --user -p MemoryMax=64G
 | `/ar0/SPHEREX/bulkphot/tars4_v0` | TARS table 4, de-duplicated (`/ar0/local/TARS/zenodo_19917941/tars_table_4_unique_stars.parquet`) | 7,481,030 | complete 2026-11-05 (images through the 2026-11-03 download, 2026W40): 3.57B rows, 7306 buckets, 164 GB bystar/; identical rows to tars_v0 for shared stars; 200-star QA sample in `qa_sample/` (csv + plots); supersedes tars_v0 (table 2 is a subset).  viz/ and ml/ products built 2026-11-06 (see ML products); sx-viz still serves tars_v0 |
 | `/ar0/SPHEREX/bulkphot/spyglass_viia_psp_v0` | collaborator list (`/ar0/local/sx-targets/spyglass_viia_psp_members_minimal.csv`, Gaia DR3 ids) | 1,161 | complete; `csv/` is the hand-off |
 | `/ar0/PROJ/fperezpa/spyglass_full_psf/run_psf` | SPYGLASS-IV members with Psp > 0.5 (`../spyglass4_psp_astrometry.csv`, Gaia DR3 ids, epoch 2016.0) | 183,458 | complete 2026-11-07 (Facundo Perez Paolino): aperture plus Gaia-forced PSF photometry (`--psf`, `psf_*` columns), 74.6M rows, 1434 buckets of 128 stars, 15 GB; neighbour table `../neighbours.parquet` (1.4 GB); SED fits in `../sed/` |
+| `/ar0/SPHEREX/bulkphot/deepfield_psf_v0` | SDF/NDF crossmatch (`input_catalog.parquet`, `sample` column): 35 hot-Jupiter TOIs (P<5 d, Rp>7 Re), 5 CPVs, 3401 TARS table 4 rotators with P<1 d; all with >=1000 images | 3,436 | complete 2026-11-11 00:28 (`run.sh`; 1.6M files in 7.6 h, 0 failed): 24.4M rows, 27 buckets of 128 stars: aperture plus Gaia-forced PSF (`--psf`, `neighbours.parquet`), 128 stars per bucket; overlapped the in-place PSF header repair (fix_psf_headers.py), so a handful of qr2 rows read mid-repair may have uncorrected zones; coverage tables and the first-pass transit and CPV analysis in `/ar0/PROJ/luke/proj/sx_phot/results/deepfield_xmatch_20261110/` |
 
 Run-dir layout:
 
@@ -152,6 +153,26 @@ complete.  No SED fits (sx-viz) for tars4 yet.
 - `masked` rows (any flagged aperture pixel) are unreliable; bright stars
   saturate below ~4 um.  Single unflagged outliers remain; the spline
   supplement clips them.
+- Bright-star fluxes carry a fixed detector-response error of 1-2%
+  (pixel-scale, 9-21 ppt rms, plus a smooth term per det and qr) that
+  the quoted errors omit.  First delta-flat maps (2026-11-11, from
+  tars4_v0 residuals; not applied in any run) and the scripts are in
+  `/ar0/PROJ/luke/proj/sx_phot/results/deepfield_xmatch_20261110/noise/`
+  (`maps/`, `scripts/apply_deltaflat.py`); they cut held-out scatter to
+  0.63-0.79x in bands 1-5 for qr2, less for qr3, nothing in band 6.
+  The excess is proportional to flux (14-26 ppt by band); quoted
+  errors are reliable only for faint stars (T > ~14).
+- OVERFLOW (pixel past half full well) affects half the exposures above
+  about 160, 150, 140, 110, 410, 620 mJy in bands 1-6; those points
+  read 0.5-1% high, and 0.5 dex brighter the scatter doubles and
+  exposures are lost to SUR_ERROR.  See
+  `/ar0/PROJ/luke/proj/sx_phot/results/deepfield_xmatch_20261110/noise_model/`.
+- PSF fluxes: the qr3 EPSF table is not flux-conserving across pixel
+  phase (2.1% rms).  `psf_phot` rescales the stamps since 2026-11-12,
+  but qr3 PSF rows written before that (all of `deepfield_psf_v0`)
+  carry about 2% extra per-visit scatter.  The qr2 cube is too broad.
+  Prefer aperture fluxes for bright stars
+  (`.../deepfield_xmatch_20261110/epsf/README.md`).
 - qr2 and qr3 use different calibrations; never mix them in one time
   series (the `qr` column separates them).
 - The IRSA PSF zone-header error (XCTR/YCTR swapped in VERSION
@@ -160,6 +181,10 @@ complete.  No SED fits (sx-viz) for tars4 yet.
   file is byte-identical to IRSA's fixed copy).  `psf_phot` still
   checks VERSION, so unrepaired files from elsewhere are handled too.
 - Rows at x or y near 0 or 2039 are gross outliers (detector edge).
+- Deep-field coverage: count images per star with
+  `image_index.images_containing`; stars 5-10 deg from the SDF/NDF centres
+  still have 2-15x normal coverage, beyond `sx_pointing`'s 5 deg flag.
+  Within one deep-field season a star samples only 1-2 of the 6 bands.
 - The old per-star pipeline (`sx_phot/circphot.py`, IRSA based) is
   1.4-5 stars/h; use it only for stars outside every bulk run, or
   for cutout animations.

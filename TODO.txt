@@ -6,6 +6,75 @@ bulk_products.py; drivers/build_image_index.py, run_bulk_phot.py,
 gather_bulk_phot.py, materialize_bulk_star.py; scripts/run_bulk_phot_tars.sh.
 
 In flight
+  [ ] SDF/NDF transit + CPV crossmatch (2026-11-10, first pass in
+      results/deepfield_xmatch_20261110/): 35 hot-Jupiter TOIs (P<5 d,
+      Rp>7 Re) with >1000 images; 18 not in any bulk run -> run a small
+      bulk list with --psf.  Per-point scatter is 4-5x flux_err_jy for
+      T~10-11 hosts: test whether PSF photometry closes the gap.
+      PSF run done 2026-11-11 (3401 TARS P<1 d rotators added):
+      /ar0/SPHEREX/bulkphot/deepfield_psf_v0.  PSF does not reduce the
+      per-point scatter (PSF/aperture 1.06; bands 5-6 0.93-0.97).  The
+      excess over flux_err_jy (3-5x in bands 1-4) is white per exposure,
+      not spectral-model error (same scatter at equal wavelength), weakly
+      intrapixel (+-3-10 ppt), and not a per-image zero point (no
+      correlation with other stars on the same image).
+      2026-11-11: the term is a fixed detector pattern (delta-flat).
+      Residuals of different stars within 0.3 px on the same detector
+      correlate at 0.45-0.5 (same qr; 0.28 across qr2/qr3), independent
+      of flux ratio and stable over 300 d.  A (det, qr) map solved from
+      518M residuals of T<12.5 tars4_v0 stars (deep-field stars held
+      out) cuts bright-star scatter to 0.63-0.79x in bands 1-5 (qr2)
+      and transit-depth errors by 18%.  Maps and scripts are in
+      results/deepfield_xmatch_20261110/noise/.  Neighbour (CPM-like)
+      regression and regression on the star's own pixels do not help
+      (same-exposure correlation at 20-160 px is 0.04).
+  [ ] Delta-flat follow-up: move the solve into sx_phot (per det and
+      ver, zone PSF weights, spline rather than Chebyshev residuals,
+      all magnitudes); band 6 shows no held-out gain and qr3 has only
+      ~10 hits per pixel in tars4_v0; consider correcting pixels before
+      the aperture sum; the qr2 PSF cube under-predicts the central
+      pixel by up to 6% of the flux for centred stars (band 3).
+      2026-11-12 (det 3 ePSF study, results/.../epsf/README.md): the
+      map is insensitive to the PSF weights (0.625-0.627 for four
+      weight sets) and the flux error is not a single-pixel gain error
+      (aperture vs central-pixel residual corr 0.10; map striped along
+      rows), so the physical picture is open.  One-page note:
+      docs/deltaflat/deltaflat.pdf (docs/ is git-ignored).
+  [ ] Delta-flat origin (2026-11-12, noise/stripe/README.md): the
+      largest identified part of the qr2 pixel term is the team's
+      QR2->QR3 gain update (public l3 flux correction c = A_QR3/A_QR2,
+      11-30 ppt rms; 51-70% of the held-out gain in dets 1-5).  Next:
+      apply F = c F_QR2 + A_QR3 (D_QR2 - D_QR3) to qr2 images before
+      photometry, then solve one residual star map per detector on
+      qr2 + qr3 at LSQR tol 1e-6 (det 4/5 maps at 1e-4 were
+      under-converged).  Row (det 1, 3) / column (det 2) line term is
+      multiplicative, present in qr3 too, mechanism unknown.
+  [ ] psf_phot: qr3 EPSF stamps are now renormalised (2026-11-12, see
+      DONE.txt), but existing runs are not: qr3 PSF rows of
+      deepfield_psf_v0 (and any other PSF run) still carry the 2.1%
+      phase term.  Rerun them, or patch psf_flux_jy by the stamp-sum
+      ratio (exact for psf_n_comp = 1).  The qr2 cube is too broad (central
+      pixel under-predicted by 2.8% of flux); the renormalised qr3
+      table with fitted positions does better on qr2 images (18.6 vs
+      19.8 ppt).  An in-house ePSF (chi2/nu 3.2 vs 8-17) only matches
+      the aperture for bright stars; revisit for faint/crowded targets.
+  [ ] Bright-star error model: excess scatter is proportional to flux
+      (log-log slope 0.90-0.99, 14-26 ppt by band; 7-15 ppt after the
+      delta-flat); quoted errors are right for faint stars (T>15.3).
+      Add a per-band fractional floor to flux_err_jy or a new column.
+      OVERFLOW (half full well) reaches 50% of exposures at 161, 147,
+      143, 114, 412, 618 mJy in bands 1-6; flagged points read 0.5-1%
+      high and scatter doubles 0.5 dex above that.  The 13-pixel
+      aperture is 2-3x noisier than PSF weighting for faint stars.
+      Tables and figures in results/deepfield_xmatch_20261110/
+      noise_model/.
+  [ ] Fast TARS rotators in the deep fields: ranked per-band,
+      per-season folds for 3011 stars in
+      results/deepfield_xmatch_20261110/tars_folds/ (427 with S/N>8;
+      png_fixedy/ has one y-range per star, eclipses unclipped);
+      not yet vetted by eye; phases are not aligned across seasons.
+      Deep-field segments sample only 1-2 bands each.  Five CPVs with
+      >1000 images (all in tars_v0).
   [ ] PSF mode (sx_phot/psf_phot.py): costs 8.6 ms CPU per star-image
       in crowded young-star fields (median 23 Gaia components per box),
       i.e. ~4-5 days on 76 cores for the 3.6B tars4 rows.  Profile and
