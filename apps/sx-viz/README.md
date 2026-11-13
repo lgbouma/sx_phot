@@ -88,6 +88,8 @@ carry it (the star page asks once and stores it in the browser).
 | `/api/sed/<tic>?grids=&logg=&mh=&blue_max_um=&err_floor=&lam_min_um=&lam_max_um=&binary=` | on-demand fit + model curves |
 | `/api/cutout/<tic>?survey=dss2r|dss2b|2massj|2massk|wise1|wise2` | SkyView JPEG, 3', cached |
 | `/api/spxcut/<tic>/<image_key>.png` | SPHEREx cutout (4', aperture + annulus, flagged pixels in orange), cached |
+| `/api/cutout/<tic>?survey=dss2r&meta=1` | JSON: epoch, source, proper-motion shift of the tile |
+| `/api/spxrgb/<tic>.png` | SPHEREx B/G/R stack (0.85 / 1.8 / 4.3 um), north up, cached |
 | `/api/report/<tic>.png` | matplotlib summary figure, cached (`?refresh=1` to redo) |
 | `/api/tarsvet/<tic>` | TARS vetting JPEG URLs proxied from lcviz on wh2 (`SX_LCVIZ_URL`, default `http://lcviz.lgbouma.com:8056`); the browser hotlinks the images |
 | `/api/verdicts` | GET all / POST `{ticid, verdict, notes}` |
@@ -103,21 +105,34 @@ headers, paging, `r` random star, CSV of the current page.  Filters live in
 the URL.  Clicking a row stores the current filtered id list (up to 2000)
 so the star page can page through it.
 
-**star.html?ticid=**: left column verdict (keys `1` binary candidate, `2`
-single, `3` unsure, `4` junk, `0` clear; notes; `n` focuses notes; "next
-after verdict" auto-advances), TARS/Gaia and spectrum summary tables,
-external links.  Centre: spectrum (log-log; used points, hollow = used but
-soft-flagged, clipped, masked with the reason on hover; spline; binned
-points; SED model curves; clicking a point loads that image's SPHEREx
-cutout), ratio of the binned spectrum to the blue-anchored model, then
-one TARS vetting JPEG from lcviz (`[`/`]` or the buttons page through the
-sectors; neighbours are preloaded), then the cutouts (two SkyView fields
-with the aperture and annulus drawn, the selected SPHEREx image, six
-SPHEREx cutouts spread over wavelength).  Right: the SED model comparison table (single star / two
-stars / star + dust with chi2, BIC and delta-BIC; lowest BIC
-highlighted), fit details, and the static report PNG.  `j`/`k`
-next/previous star.  The on-demand refit endpoint `/api/sed/<tic>?...`
-still exists (link "fit JSON") but has no controls on the page.
+**star.html?ticid=**: left column TARS/Gaia and spectrum summary tables,
+external links, and a free-text notes box (`n` focuses it; saved on Save
+or when paging away, through `/api/verdicts`; the table page shows the
+notes in its last column).  Centre: spectrum (log-log; used points,
+hollow = used but soft-flagged, clipped, masked with the reason on hover;
+spline; binned points; SED model curves with the lowest-BIC model drawn
+thick and its components dotted; clicking a point loads that image's
+SPHEREx cutout), ratio of the binned spectrum to the blue-anchored model,
+then a two-column block: one TARS vetting JPEG from lcviz on the left
+(`[`/`]` or the buttons page through the sectors; neighbours are
+preloaded) and the cutouts on the right (a SkyView field with the
+aperture and annulus drawn, survey selectable in the tile; the SPHEREx
+three-band colour stack; the selected SPHEREx image; six SPHEREx
+cutouts spread over wavelength).  Sky tiles are centred on the star's
+position at the image epoch: DSS2 red/blue come from the STScI DSS
+server, whose plate date is read from the FITS header, and the Gaia
+2016.0 position is moved there with the table's proper motion (the tile
+label gives the epoch and the shift; a red cross marks the 2016.0
+position when the shift exceeds 0.5"); 2MASS and WISE use SkyView and a
+nominal survey epoch.  All cutouts are north up, east left:
+SPHEREx tiles are resampled from detector pixels through the image WCS
+at the native 6.1"/px (`sx_phot.viz_report.sky_cutout`).  Right: the
+SED model comparison table (single star / two stars / star + dust with
+chi2, BIC and delta-BIC; the preferred row marked), fit details, and the
+static report PNG (spectrum with the preferred model thick, ratio, flux
+time series, DSS2 red and the SPHEREx stack).  `j`/`k` next/previous
+star.  The on-demand refit endpoint `/api/sed/<tic>?...` still exists
+(link "fit JSON") but has no controls on the page.
 
 ## Quality masks (sx_phot.viz_products.quality_masks)
 

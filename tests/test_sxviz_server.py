@@ -159,3 +159,49 @@ def test_tars_vetting_unreachable(data, monkeypatch):
     assert out["images"] == []
     assert "error" in out
     assert out["star_url"].endswith("ticid=111")
+
+
+def test_dss_cutout_recentres_on_proper_motion(data, tmp_path, monkeypatch):
+    """A fake STScI DSS plate: the tile centre follows the proper motion."""
+    import io
+
+    import requests
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    from PIL import Image
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [10.0, -5.0]  # TIC 111 in the fixture
+    w.wcs.crpix = [150.0, 150.0]
+    w.wcs.cd = np.array([[-1.0, 0.0], [0.0, 1.0]]) / 3600  # 1"/px, N up
+    img = np.full((300, 300), 10.0)
+    # Star drawn at its 1990 position: it reaches the 2016 position
+    # (0-based pixel 149, 149) after 26 years of +1000 mas/yr eastward,
+    # so in 1990 it was 26" west = 26 px to the right (CD1_1 < 0).
+    img[149, 149 + 26] = 1000.0
+    hdr = w.to_header()
+    hdr["DATE-OBS"] = "1990-01-01T00:00:00"
+    buf = io.BytesIO()
+    fits.PrimaryHDU(img, header=hdr).writeto(buf)
+
+    class Resp:
+        status_code = 200
+        content = buf.getvalue()
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Resp())
+    data.table.loc[data.row_of[111], ["pmra", "pmdec"]] = [1000.0, 0.0]
+    old_dir = data.viz_dir
+    data.viz_dir = tmp_path
+    try:
+        jpeg = data.sky_cutout(111, "dss2r")
+        meta = data.sky_cutout_meta(111, "dss2r")
+    finally:
+        data.viz_dir = old_dir
+    assert jpeg is not None and jpeg.startswith(b"\xff\xd8")
+    assert meta["source"] == "stsci-dss" and meta["epoch"] == 1990.0
+    assert meta["shift_arcsec"] == pytest.approx(26.0, abs=0.1)
+    assert meta["offset_east_arcsec"] == pytest.approx(26.0, abs=0.1)
+    arr = np.asarray(Image.open(io.BytesIO(jpeg)))
+    iy, ix = np.unravel_index(np.argmax(arr), arr.shape)
+    assert abs(ix - 150) <= 1 and abs(iy - 150) <= 1

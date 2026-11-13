@@ -165,7 +165,9 @@ td.has-notes { color: var(--warm); max-width: 220px; overflow: hidden; text-over
 .cutout-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .cutout-row { display: grid; gap: 6px; margin-bottom: 6px; }
 .cutout-row-3 { grid-template-columns: repeat(3, 1fr); }
-.cutout-row-6 { grid-template-columns: repeat(6, 1fr); }
+.lower-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; align-items: start; }
+.survey-select { position: absolute; right: 3px; top: 3px; font-size: 0.68rem; padding: 1px 3px; opacity: 0.75; }
+.survey-select:hover { opacity: 1; }
 .tarsvet-nav { display: flex; gap: 8px; align-items: center; font-size: 0.8rem; margin: 2px 0 6px; }
 .tarsvet img { width: 100%; height: auto; display: block; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
 .tarsvet .caption { font-size: 0.78rem; color: var(--muted); margin: 0 0 2px; }
@@ -174,11 +176,12 @@ td.has-notes { color: var(--warm); max-width: 220px; overflow: hidden; text-over
 .model-table th:first-child { text-align: left; }
 .model-table tr.params td { color: var(--muted); font-size: 0.74rem; border-bottom: 1px solid var(--border); }
 .model-table tr:not(.params) td { border-bottom: none; }
-.model-table tr.best td { color: var(--accent); }
-.model-table tr.best td:first-child { font-weight: 600; }
+.model-table tr.best td { color: var(--accent); background: var(--accent-soft); }
+.model-table tr.best td:first-child { font-weight: 700; }
+.model-table tr.params.best td { color: var(--accent); }
 .cutout { position: relative; background: #000; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .cutout img { display: block; width: 100%; height: auto; }
-.cutout .label { position: absolute; left: 4px; top: 3px; font-size: 0.7rem; color: #fff; text-shadow: 0 0 3px #000; }
+.cutout .label { position: absolute; left: 4px; top: 3px; font-size: 0.7rem; color: #fff; text-shadow: 0 0 3px #000; max-width: 70%; }
 .cutout svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
 .cutout.selected { border-color: var(--accent); }
 textarea { width: 100%; min-height: 70px; resize: vertical; }

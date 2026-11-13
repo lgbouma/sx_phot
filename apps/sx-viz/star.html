@@ -67,30 +67,31 @@
         <div id="spectrum-plot" class="plot"></div>
         <div id="ratio-plot" class="plot"></div>
 
-        <div class="panel" style="margin-top:12px">
-          <h3>TARS vetting (TESS) <span class="muted" style="text-transform:none; letter-spacing:0">· <a id="lcviz-link" href="#" target="_blank">open in lcviz</a></span></h3>
-          <div class="tarsvet-nav">
-            <button id="tarsvet-prev" type="button" title="previous sector ([)">&larr; sector</button>
-            <span id="tarsvet-pos" class="small muted"></span>
-            <button id="tarsvet-next" type="button" title="next sector (])">sector &rarr;</button>
-            <span id="period-text" class="muted small"></span>
+        <div class="lower-row">
+          <div class="panel">
+            <h3>TARS vetting (TESS) <span class="muted" style="text-transform:none; letter-spacing:0">· <a id="lcviz-link" href="#" target="_blank">open in lcviz</a></span></h3>
+            <div class="tarsvet-nav">
+              <button id="tarsvet-prev" type="button" title="previous sector ([)">&larr; sector</button>
+              <span id="tarsvet-pos" class="small muted"></span>
+              <button id="tarsvet-next" type="button" title="next sector (])">sector &rarr;</button>
+              <span id="period-text" class="muted small"></span>
+            </div>
+            <div id="tarsvet" class="tarsvet"></div>
           </div>
-          <div id="tarsvet" class="tarsvet"></div>
-        </div>
 
-        <div class="panel" style="margin-top:12px">
-          <h3>Cutouts <span class="muted" style="text-transform:none; letter-spacing:0">· sky 3' (N up, E left; circles: 2 px aperture, 6-8 px annulus) · SPHEREx 4' · click a SPHEREx tile or a spectrum point to enlarge</span></h3>
-          <div class="plot-controls">
-            <select id="survey-a"></select>
-            <select id="survey-b"></select>
+          <div class="panel">
+            <h3>Cutouts <span class="muted" style="text-transform:none; letter-spacing:0">· N up, E left · sky 3', SPHEREx 4' · circles: 2 px aperture, 6-8 px annulus</span></h3>
+            <div class="cutout-row cutout-row-3">
+              <div class="cutout" id="sky-a">
+                <img alt="" /><span class="label"></span>
+                <select id="survey-a" class="survey-select"></select>
+              </div>
+              <div class="cutout" id="spx-rgb"><img alt="" /><span class="label">SPHEREx stack</span></div>
+              <div class="cutout" id="spx-selected"><img alt="" /><span class="label">selected image</span></div>
+            </div>
+            <div id="spx-selected-info" class="small muted"></div>
+            <div class="cutout-row cutout-row-3" id="spx-grid"></div>
           </div>
-          <div class="cutout-row cutout-row-3">
-            <div class="cutout" id="sky-a"><img alt="" /><span class="label"></span></div>
-            <div class="cutout" id="sky-b"><img alt="" /><span class="label"></span></div>
-            <div class="cutout" id="spx-selected"><img alt="" /><span class="label">selected image</span></div>
-          </div>
-          <div id="spx-selected-info" class="small muted"></div>
-          <div class="cutout-row cutout-row-6" id="spx-grid"></div>
         </div>
       </main>
 
@@ -102,6 +103,7 @@
           <p class="muted small" style="margin:6px 0 0">
             SPHINX (Teff &le; 4000 K) and Castelli-Kurucz grids at the dwarf log g, [M/H] = 0;
             R=40 binned spectrum with a 2% error floor; BIC = chi2 + k ln n.
+            The lowest-BIC model is drawn thick in the plots.
             <a id="sed-json" href="#" target="_blank">fit JSON</a>
           </p>
         </div>

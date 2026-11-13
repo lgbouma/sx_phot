@@ -3,6 +3,7 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  const has = (v) => v !== null && v !== undefined && Number.isFinite(v);
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   const params = new URLSearchParams(location.search);
   const ticid = params.get("ticid");
@@ -22,6 +23,7 @@
   };
   const PLOT_CONFIG = { displaylogo: false, responsive: true,
     modeBarButtonsToRemove: ["lasso2d", "select2d"] };
+  // key: [name, colour, dash, is a total (vs a component)]
   const MODEL_STYLES = {
     full: ["single star", "#ff9f43", "solid", true],
     blue: ["blue-anchored", "#6cc04a", "dash", true],
@@ -31,6 +33,20 @@
     bin2: ["secondary", "#f06292", "dot", false],
     disk_bb: ["dust blackbody", "#4fc3f7", "dot", false],
   };
+  const COMPONENT_OF = { bin1: "binary", bin2: "binary", disk_bb: "disk" };
+  const BIC_KEYS = { full: "bic_single", binary: "bic_binary", disk: "bic_disk" };
+  const MODEL_NAMES = { full: "single star", binary: "two stars", disk: "star + dust" };
+
+  // Key of the lowest-BIC model among single / two stars / star + dust.
+  function preferredModel() {
+    const f = state.sed && state.sed.fit;
+    if (!f) return null;
+    let best = null, bestBic = Infinity;
+    Object.entries(BIC_KEYS).forEach(([key, col]) => {
+      if (has(f[col]) && f[col] < bestBic) { best = key; bestBic = f[col]; }
+    });
+    return best;
+  }
 
   const TARS_ROWS = [
     ["Tmag", "Tmag", (v) => v.toFixed(2)],
@@ -70,9 +86,6 @@
     ["med_snr", "median S/N", (v) => v.toFixed(0)],
     ["resid_mad", "median |res|/err", (v) => v.toFixed(2)],
     ["mjd_min", "MJD range", (v) => v.toFixed(0)],
-    ["c_1p6_0p9", "log F1.6/F0.9", (v) => v.toFixed(3)],
-    ["c_3p6_1p6", "log F3.6/F1.6", (v) => v.toFixed(3)],
-    ["c_4p7_3p6", "log F4.7/F3.6", (v) => v.toFixed(3)],
   ];
 
   function kv(table, rows, src, highlight) {
@@ -96,7 +109,6 @@
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
     return body;
   }
-  const has = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
   // ---------------------------------------------------------------- nav
   function loadNav() {
@@ -246,14 +258,24 @@
       });
     }
     if ($("show-sed").checked && state.sed && state.sed.curves) {
-      Object.entries(MODEL_STYLES).forEach(([key, [name, color, dash, visible]]) => {
+      // The lowest-BIC model (its total, for two stars / star + dust) is
+      // drawn thick and solid; the other totals thin; components of the
+      // preferred model dotted, components of the others legend-only.
+      const best = preferredModel();
+      Object.entries(MODEL_STYLES).forEach(([key, [name, color, dash, isTotal]]) => {
         const c = state.sed.curves[key];
         if (!c) return;
+        const parent = COMPONENT_OF[key] || key;
+        const preferred = parent === best;
+        const show = isTotal || preferred;
         traces.push({
-          type: "scatter", mode: "lines", name, hoverinfo: "skip",
+          type: "scatter", mode: "lines", hoverinfo: "skip",
+          name: isTotal && preferred ? `${name} (preferred)` : name,
           x: c.lam, y: c.flux.map((v) => (v === null ? null : v * 1e3)),
-          line: { color, width: visible ? 1.3 : 1, dash },
-          visible: visible ? true : "legendonly",
+          line: isTotal && preferred ? { color, width: 3, dash: "solid" }
+            : { color, width: isTotal ? 1 : 0.9, dash },
+          opacity: isTotal && !preferred ? 0.55 : 1,
+          visible: show ? true : "legendonly",
         });
       });
     }
@@ -287,11 +309,15 @@
       traces.push({ type: "scatter", mode: "markers", name: label, x: b.lam, y,
         error_y: { type: "data", array: e, visible: true, color: "#888", thickness: 1 },
         marker: { size: 5, color: "#f2f2f2" } });
-      const line = (name, arr, color, dash) => traces.push({ type: "scatter", mode: "lines", name, x: b.lam,
-        y: arr.map((v, i) => (v === null || !(ref[i] > 0) ? null : v / ref[i])), line: { color, width: 1, dash } });
-      if (bm.full) line("single / blue model", bm.full, MODEL_STYLES.full[1], "solid");
-      if (bm.bin1 && bm.bin2) line("two stars / blue model", bm.bin1.map((v, i) => (v === null || bm.bin2[i] === null ? null : v + bm.bin2[i])), MODEL_STYLES.binary[1], "dashdot");
-      if (bm.disk_star && bm.disk_bb) line("star + dust / blue model", bm.disk_star.map((v, i) => (v === null || bm.disk_bb[i] === null ? null : v + bm.disk_bb[i])), MODEL_STYLES.disk[1], "longdash");
+      const best = preferredModel();
+      const line = (key, name, arr, color, dash) => traces.push({ type: "scatter", mode: "lines", x: b.lam,
+        name: key === best ? `${name} (preferred)` : name,
+        y: arr.map((v, i) => (v === null || !(ref[i] > 0) ? null : v / ref[i])),
+        line: key === best ? { color, width: 2.6, dash: "solid" } : { color, width: 1, dash },
+        opacity: key === best ? 1 : 0.55 });
+      if (bm.full) line("full", "single / blue model", bm.full, MODEL_STYLES.full[1], "solid");
+      if (bm.bin1 && bm.bin2) line("binary", "two stars / blue model", bm.bin1.map((v, i) => (v === null || bm.bin2[i] === null ? null : v + bm.bin2[i])), MODEL_STYLES.binary[1], "dashdot");
+      if (bm.disk_star && bm.disk_bb) line("disk", "star + dust / blue model", bm.disk_star.map((v, i) => (v === null || bm.disk_bb[i] === null ? null : v + bm.disk_bb[i])), MODEL_STYLES.disk[1], "longdash");
     }
     let yr = [0.6, 1.6];
     if (traces.length) {
@@ -314,14 +340,25 @@
   function drawAll() { drawSpectrum(); drawRatio(); }
 
   // ------------------------------------------------------------- cutouts
-  function overlaySvg() {
+  // Aperture and annulus at the tile centre (the star at the image
+  // epoch); a small cross marks the Gaia 2016.0 position when the
+  // proper-motion shift is known (meta from /api/cutout?meta=1).
+  function overlaySvg(meta) {
     const scale = 300 / 180.0; // px per arcsec at 0.6"/px
     const c = 150;
     const r1 = 2 * 6.1 * scale, r2 = 6 * 6.1 * scale, r3 = 8 * 6.1 * scale;
+    let gaia = "";
+    if (meta && has(meta.offset_east_arcsec) && meta.shift_arcsec > 0.5) {
+      const gx = c - meta.offset_east_arcsec * scale, gy = c - meta.offset_north_arcsec * scale;
+      gaia = `<line x1="${c}" y1="${c}" x2="${gx.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#ef7b6d" stroke-width="0.8" stroke-dasharray="2 2"/>
+      <line x1="${(gx - 5).toFixed(1)}" y1="${gy.toFixed(1)}" x2="${(gx + 5).toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#ef7b6d" stroke-width="1.2"/>
+      <line x1="${gx.toFixed(1)}" y1="${(gy - 5).toFixed(1)}" x2="${gx.toFixed(1)}" y2="${(gy + 5).toFixed(1)}" stroke="#ef7b6d" stroke-width="1.2"/>`;
+    }
     return `<svg viewBox="0 0 300 300">
       <circle cx="${c}" cy="${c}" r="${r1.toFixed(1)}" fill="none" stroke="#7ad7c7" stroke-width="1.2"/>
       <circle cx="${c}" cy="${c}" r="${r2.toFixed(1)}" fill="none" stroke="#f2c94c" stroke-width="0.8" stroke-dasharray="4 3"/>
       <circle cx="${c}" cy="${c}" r="${r3.toFixed(1)}" fill="none" stroke="#f2c94c" stroke-width="0.8" stroke-dasharray="4 3"/>
+      ${gaia}
       <line x1="10" y1="285" x2="${(10 + 60 * scale).toFixed(1)}" y2="285" stroke="#fff" stroke-width="2"/>
       <text x="${(10 + 30 * scale).toFixed(1)}" y="280" fill="#fff" font-size="11" text-anchor="middle">1'</text>
     </svg>`;
@@ -329,29 +366,38 @@
   function loadSky(slot, survey) {
     const host = $(slot);
     const img = host.querySelector("img");
+    const label = host.querySelector(".label");
     host.querySelectorAll("svg").forEach((s) => s.remove());
-    host.querySelector(".label").textContent = (state.meta.surveys[survey] || survey) + " …";
+    label.textContent = (state.meta.surveys[survey] || survey) + " …";
     img.src = `/api/cutout/${ticid}?survey=${survey}`;
-    img.onload = () => {
-      host.querySelector(".label").textContent = state.meta.surveys[survey] || survey;
-      host.insertAdjacentHTML("beforeend", overlaySvg());
+    img.onload = async () => {
+      let meta = null;
+      try { meta = await fetchJson(`/api/cutout/${ticid}?survey=${survey}&meta=1`); } catch (e) { /* no meta */ }
+      host.querySelectorAll("svg").forEach((s) => s.remove());
+      host.insertAdjacentHTML("beforeend", overlaySvg(meta));
+      label.textContent = meta && has(meta.epoch)
+        ? `epoch ${meta.epoch.toFixed(1)} · pm shift ${meta.shift_arcsec.toFixed(1)}"` + (meta.source === "skyview-nominal-epoch" ? " (nominal)" : "")
+        : "";
     };
-    img.onerror = () => { host.querySelector(".label").textContent = `${survey}: unavailable`; };
+    img.onerror = () => { label.textContent = `${survey}: unavailable`; };
     localStorage.setItem("sxviz." + slot, survey);
   }
   function setupSky() {
-    ["a", "b"].forEach((k, j) => {
-      const sel = $("survey-" + k);
-      sel.innerHTML = "";
-      Object.entries(state.meta.surveys).forEach(([key, name]) => {
-        const o = document.createElement("option");
-        o.value = key; o.textContent = name; sel.appendChild(o);
-      });
-      const def = localStorage.getItem("sxviz.sky-" + k) || (j === 0 ? "dss2r" : "dss2ir");
-      sel.value = def;
-      sel.addEventListener("change", () => loadSky("sky-" + k, sel.value));
-      loadSky("sky-" + k, sel.value);
+    const sel = $("survey-a");
+    sel.innerHTML = "";
+    Object.entries(state.meta.surveys).forEach(([key, name]) => {
+      const o = document.createElement("option");
+      o.value = key; o.textContent = name; sel.appendChild(o);
     });
+    const stored = localStorage.getItem("sxviz.sky-a");
+    sel.value = stored && state.meta.surveys[stored] ? stored : "dss2r";
+    sel.addEventListener("change", () => loadSky("sky-a", sel.value));
+    loadSky("sky-a", sel.value);
+    const rgb = $("spx-rgb");
+    const img = rgb.querySelector("img");
+    img.onload = () => { rgb.querySelector(".label").textContent = ""; };
+    img.onerror = () => { rgb.querySelector(".label").textContent = "SPHEREx stack: no images"; };
+    img.src = `/api/spxrgb/${ticid}.png`;
   }
   function cutoutCard(c) {
     const div = document.createElement("div");
@@ -375,8 +421,11 @@
     const i = sp.image_key.indexOf(String(key));
     state.selectedKey = String(key);
     const host = $("spx-selected");
-    host.querySelector("img").src = `/api/spxcut/${ticid}/${key}.png`;
-    host.querySelector(".label").textContent = i >= 0 ? `SPHEREx ${sp.wavelength_um[i].toFixed(3)} um` : String(key);
+    const img = host.querySelector("img");
+    host.querySelector(".label").textContent = "loading …";
+    img.onload = () => { host.querySelector(".label").textContent = ""; };  // the PNG carries its title
+    img.onerror = () => { host.querySelector(".label").textContent = `image ${key}: unavailable`; };
+    img.src = `/api/spxcut/${ticid}/${key}.png`;
     $("spx-selected-info").textContent = i >= 0
       ? `selected: image ${key} · TJD ${sp.tjd_avg[i]} · ${(sp.flux_jy[i] * 1e3).toFixed(3)} mJy · ${maskReason((sp.mask_bits || [])[i] || 0, sp.masked[i], sp.fit_mask[i])} · flag ${sp.flag_or[i]}`
       : "";
@@ -462,15 +511,19 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${r[0]}</td><td>${has(r[2]) ? `${r[2].toFixed(0)} / ${r[3]}` : "–"}</td>` +
         `<td>${has(r[4]) ? r[4].toFixed(0) : "–"}</td><td>${has(r[5]) ? (r[5] > 0 ? "+" : "") + r[5].toFixed(0) : "–"}</td>`;
-      if (best && r === best) tr.classList.add("best");
-      t.appendChild(tr);
       const sub = document.createElement("tr");
       sub.className = "params";
       sub.innerHTML = `<td colspan="4" style="text-align:left; padding-left:14px">${r[1]}</td>`;
+      if (best && r === best) {
+        tr.classList.add("best");
+        sub.classList.add("best");
+        tr.firstChild.innerHTML = `&#9654; ${r[0]}`;
+      }
+      t.appendChild(tr);
       t.appendChild(sub);
     });
     const parts = [];
-    if (best) parts.push(`lowest BIC: ${best[0]}`);
+    if (best) parts.push(`preferred (lowest BIC): ${best[0]}`);
     if (has(f.dbic_disk_vs_binary)) parts.push(`ΔBIC (two stars − star+dust) = ${f.dbic_disk_vs_binary > 0 ? "+" : ""}${f.dbic_disk_vs_binary.toFixed(0)}`);
     if (has(row.red_excess_rel_sig)) parts.push(`Teff-relative red excess ${(100 * row.red_excess_rel).toFixed(1)}% (${row.red_excess_rel_sig.toFixed(1)}σ)`);
     if (has(row.radius_ratio_full_rel)) parts.push(`radius ratio (Teff-rel) ${row.radius_ratio_full_rel.toFixed(2)}`);

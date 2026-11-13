@@ -9,8 +9,10 @@ of a bulk photometry run, joined with the TARS table.  Endpoints:
 * ``GET /api/table?...``            server-side filtered, sorted page
 * ``GET /api/star/<tic>``           everything one star page needs
 * ``GET /api/sed/<tic>?...``        on-demand SED fit with options
-* ``GET /api/cutout/<tic>?survey=`` sky cutout (SkyView, disk-cached)
-* ``GET /api/spxcut/<tic>/<key>``   SPHEREx cutout PNG (disk-cached)
+* ``GET /api/cutout/<tic>?survey=`` sky cutout, proper-motion corrected
+  to the plate epoch (STScI DSS or SkyView; ``&meta=1`` for the JSON)
+* ``GET /api/spxcut/<tic>/<key>``   SPHEREx cutout PNG, north up (cached)
+* ``GET /api/spxrgb/<tic>.png``     SPHEREx three-band colour stack (cached)
 * ``GET /api/report/<tic>.png``     matplotlib report (disk-cached)
 * ``GET /api/tarsvet/<tic>``        TARS vetting JPEG URLs, proxied from
                                     the lcviz app on wh2 (``LCVIZ_URL``)
@@ -97,7 +99,7 @@ LCVIZ_URL = os.environ.get("SX_LCVIZ_URL", "http://lcviz.lgbouma.com:8056")
 LCVIZ_TTL_SEC = 6 * 3600
 
 SKYVIEW_SURVEYS = {
-    "dss2r": "DSS2 Red", "dss2ir": "DSS2 IR", "dss2b": "DSS2 Blue",
+    "dss2r": "DSS2 Red", "dss2b": "DSS2 Blue",
     "wise1": "WISE 3.4", "wise2": "WISE 4.6", "2massj": "2MASS-J",
     "2massk": "2MASS-K",
 }
@@ -105,6 +107,18 @@ SKYVIEW_MIN_BYTES = 3000  # smaller JPEGs are SkyView's blank "no data" image
 SKYVIEW_URL = "https://skyview.gsfc.nasa.gov/current/cgi/runquery.pl"
 CUTOUT_SIZE_DEG = 0.05
 CUTOUT_PIXELS = 300
+CUTOUT_ARCSEC_PER_PIXEL = CUTOUT_SIZE_DEG * 3600 / CUTOUT_PIXELS  # 0.6"
+# DSS2 tiles come from the STScI server, whose FITS headers carry the
+# plate date, so the Gaia (2016.0) position can be moved to the plate
+# epoch before cutting.  Other surveys use SkyView and a nominal epoch.
+DSS_URL = "https://archive.stsci.edu/cgi-bin/dss_search"
+DSS_SURVEYS = {"dss2r": "poss2ukstu_red", "dss2b": "poss2ukstu_blue"}
+DSS_FETCH_ARCMIN = 5.0  # room to re-centre by up to ~1' of proper motion
+NOMINAL_EPOCH = {"dss2r": 1992.0, "dss2b": 1992.0, "2massj": 1999.5,
+                 "2massk": 1999.5, "wise1": 2010.5, "wise2": 2010.5}
+GAIA_EPOCH = 2016.0
+# Target wavelengths (um) of the blue / green / red SPHEREx stack channels.
+RGB_TARGETS_UM = (0.85, 1.8, 4.3)
 
 
 # ----------------------------------------------------------------------
@@ -534,18 +548,127 @@ class Data:
 
     # -- cutouts -----------------------------------------------------------
 
-    def sky_cutout(self, ticid: int, survey: str) -> Optional[bytes]:
-        """Fetch (and cache) a SkyView JPEG cutout."""
-        import requests
+    def _sky_cache(self, ticid: int, survey: str) -> Path:
+        return self.viz_dir / "cutouts" / survey / f"{int(ticid)}.jpg"
 
+    def sky_cutout(self, ticid: int, survey: str) -> Optional[bytes]:
+        """Sky cutout JPEG (north up, east left), cached on disk.
+
+        The tile is centred on the star's position at the epoch of the
+        image: the plate date for DSS2 (STScI server), a nominal survey
+        epoch otherwise.  A JSON sidecar records the epoch and shift
+        (``sky_cutout_meta``).
+        """
         if survey not in SKYVIEW_SURVEYS:
             raise ValueError("unknown survey")
-        cache = self.viz_dir / "cutouts" / survey / f"{int(ticid)}.jpg"
+        cache = self._sky_cache(ticid, survey)
         if cache.exists():
             return cache.read_bytes()
         row = self.table.iloc[self.row_of[int(ticid)]]
+        ra, dec = float(row["ra"]), float(row["dec"])
+        pmra, pmdec = row.get("pmra"), row.get("pmdec")
+        result = None
+        if survey in DSS_SURVEYS:
+            result = self._dss_cutout(ticid, survey, ra, dec, pmra, pmdec)
+        if result is None:
+            result = self._skyview_cutout(ticid, survey, ra, dec, pmra,
+                                          pmdec)
+        if result is None:
+            return None
+        jpeg, meta = result
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_bytes(jpeg)
+        os.replace(tmp, cache)
+        cache.with_suffix(".json").write_text(json.dumps(meta))
+        return jpeg
+
+    def sky_cutout_meta(self, ticid: int, survey: str) -> Optional[dict]:
+        """Epoch and proper-motion shift of a cached tile (None if none)."""
+        if self.sky_cutout(ticid, survey) is None:
+            return None
+        side = self._sky_cache(ticid, survey).with_suffix(".json")
+        return json.loads(side.read_text()) if side.exists() else {}
+
+    @staticmethod
+    def _shift_meta(ra: float, dec: float, ra_e: float, dec_e: float,
+                    epoch: float, source: str, pmra, pmdec) -> dict:
+        """Describe the move from the Gaia position to the tile centre."""
+        cosd = np.cos(np.radians(dec))
+        de = (ra - ra_e) * cosd * 3600  # catalogue minus tile centre
+        dn = (dec - dec_e) * 3600
+        return {"epoch": round(float(epoch), 2), "source": source,
+                "arcsec_per_pixel": CUTOUT_ARCSEC_PER_PIXEL,
+                "pmra": _json_safe(pmra), "pmdec": _json_safe(pmdec),
+                "offset_east_arcsec": round(float(de), 2),
+                "offset_north_arcsec": round(float(dn), 2),
+                "shift_arcsec": round(float(np.hypot(de, dn)), 2)}
+
+    def _dss_cutout(self, ticid: int, survey: str, ra: float, dec: float,
+                    pmra, pmdec):
+        """DSS2 tile from STScI, re-centred at the plate epoch."""
+        import requests
+        from astropy.io import fits
+        from astropy.wcs import WCS
+        from PIL import Image
+
+        from sx_phot.viz_report import (decimal_year, propagate_position,
+                                        resample_north_up)
+
+        params = {"v": DSS_SURVEYS[survey], "r": f"{ra:.6f}",
+                  "d": f"{dec:.6f}", "e": "J2000",
+                  "h": f"{DSS_FETCH_ARCMIN}", "w": f"{DSS_FETCH_ARCMIN}",
+                  "f": "fits", "c": "none"}
+        try:
+            resp = requests.get(DSS_URL, params=params, timeout=45)
+        except requests.RequestException as exc:
+            LOGGER.warning("dss %s TIC %d: %s", survey, ticid, exc)
+            return None
+        if resp.status_code != 200 or not resp.content.startswith(b"SIMPLE"):
+            LOGGER.warning("dss %s TIC %d: HTTP %d (%d bytes)", survey,
+                           ticid, resp.status_code, len(resp.content))
+            return None
+        try:
+            with fits.open(io.BytesIO(resp.content)) as hdul:
+                data = np.array(hdul[0].data, float)
+                hdr = hdul[0].header
+            epoch = decimal_year(hdr.get("DATE-OBS", ""))
+            if epoch is None:
+                epoch = NOMINAL_EPOCH[survey]
+            ra_e, dec_e = propagate_position(ra, dec, pmra, pmdec, epoch)
+            wcs = WCS(hdr)
+            x, y = (float(v) for v in wcs.all_world2pix(ra_e, dec_e, 0))
+            img, _ = resample_north_up(
+                data, wcs, x, y, CUTOUT_PIXELS // 2,
+                out_scale=CUTOUT_ARCSEC_PER_PIXEL, order=1)
+        except Exception as exc:  # noqa: BLE001 - odd plate headers
+            LOGGER.warning("dss %s TIC %d: %s", survey, ticid, exc)
+            return None
+        finite = np.isfinite(img)
+        if finite.sum() < 100:
+            return None
+        lo, hi = np.nanpercentile(img[finite], [1, 99.7])
+        if hi - lo <= 1e-6 * max(1.0, abs(lo)):  # flat field: use the max
+            hi = max(float(np.nanmax(img[finite])), lo + 1.0)
+        u8 = np.zeros(img.shape, np.uint8)
+        u8[finite] = np.clip(255 * (img[finite] - lo) / (hi - lo), 0, 255)
+        buf = io.BytesIO()
+        # Flip so that north is at the top of the JPEG.
+        Image.fromarray(u8[::-1]).save(buf, format="JPEG", quality=90)
+        return buf.getvalue(), self._shift_meta(
+            ra, dec, ra_e, dec_e, epoch, "stsci-dss", pmra, pmdec)
+
+    def _skyview_cutout(self, ticid: int, survey: str, ra: float,
+                        dec: float, pmra, pmdec):
+        """SkyView JPEG at the position propagated to a nominal epoch."""
+        import requests
+
+        from sx_phot.viz_report import propagate_position
+
+        epoch = NOMINAL_EPOCH.get(survey, GAIA_EPOCH)
+        ra_e, dec_e = propagate_position(ra, dec, pmra, pmdec, epoch)
         params = {
-            "Position": f"{row['ra']:.6f},{row['dec']:.6f}",
+            "Position": f"{ra_e:.6f},{dec_e:.6f}",
             "Survey": SKYVIEW_SURVEYS[survey],
             "Size": f"{CUTOUT_SIZE_DEG}", "Pixels": f"{CUTOUT_PIXELS}",
             "Return": "JPEG", "Projection": "Tan", "Sampler": "LI",
@@ -561,17 +684,15 @@ class Data:
             LOGGER.warning("skyview %s TIC %d: HTTP %d (%d bytes)", survey,
                            ticid, resp.status_code, len(resp.content))
             return None
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_suffix(".tmp")
-        tmp.write_bytes(resp.content)
-        os.replace(tmp, cache)
-        return resp.content
+        return resp.content, self._shift_meta(
+            ra, dec, ra_e, dec_e, epoch, "skyview-nominal-epoch", pmra,
+            pmdec)
 
     def spherex_cutout(self, ticid: int, image_key: int) -> Optional[bytes]:
         """Render (and cache) a SPHEREx cutout PNG around the star."""
         from sx_phot.viz_report import render_spherex_cutout
 
-        cache = (self.viz_dir / "cutouts" / "spherex"
+        cache = (self.viz_dir / "cutouts" / "spherex_nup"
                  / f"{int(ticid) % 1000:03d}"
                  / f"{int(ticid)}_{int(image_key)}.png")
         if cache.exists():
@@ -600,8 +721,74 @@ class Data:
         os.replace(tmp, cache)
         return png
 
+    def rgb_channels(self, ticid: int) -> list[dict]:
+        """Unmasked images nearest the blue / green / red stack targets."""
+        df = self.spectra.read(ticid)
+        good = df[~df["masked"] & np.isfinite(df["flux_jy"])]
+        if good.empty:
+            good = df[np.isfinite(df["flux_jy"])]
+        picks = []
+        for t in RGB_TARGETS_UM:
+            if good.empty:
+                picks.append(None)
+                continue
+            k = int(np.argmin(np.abs(good["wavelength_um"].to_numpy() - t)))
+            r = good.iloc[k]
+            picks.append({"image_key": int(r["image_key"]),
+                          "wavelength_um": float(r["wavelength_um"]),
+                          "x": float(r["x"]), "y": float(r["y"])})
+        return picks
+
+    def rgb_stack(self, ticid: int):
+        """North-up SPHEREx colour stack: ``(rgb array, caption)``.
+
+        Returns ``(None, caption)`` when no image file is reachable.
+        """
+        from sx_phot.viz_report import rgb_stack, sky_cutout
+
+        cuts, labels = [], []
+        for pick in self.rgb_channels(ticid):
+            cut = None
+            if pick is not None and pick["image_key"] in self.index.index:
+                path = Path(self.index.loc[pick["image_key"], "path"])
+                if path.exists():
+                    cut, _, _ = sky_cutout(path, pick["x"], pick["y"])
+            cuts.append(cut)
+            labels.append(f"{pick['wavelength_um']:.2f}" if cut is not None
+                          else "-")
+        caption = "SPHEREx B/G/R = " + "/".join(labels) + " um"
+        if all(c is None for c in cuts):
+            return None, caption
+        return rgb_stack(cuts), caption
+
+    def spherex_rgb(self, ticid: int) -> Optional[bytes]:
+        """Render (and cache) the SPHEREx colour-stack PNG."""
+        from sx_phot.viz_report import ARCSEC_PER_PIXEL, render_rgb_cutout
+
+        cache = (self.viz_dir / "cutouts" / "spxrgb"
+                 / f"{int(ticid) % 1000:03d}" / f"{int(ticid)}.png")
+        if cache.exists():
+            return cache.read_bytes()
+        rgb, caption = self.rgb_stack(ticid)
+        if rgb is None:
+            return None
+        phot = self.config["phot"]
+        png = render_rgb_cutout(
+            rgb, ARCSEC_PER_PIXEL, phot["aperture_radius"],
+            phot["annulus_r_in"], phot["annulus_r_out"], title=caption)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_bytes(png)
+        os.replace(tmp, cache)
+        return png
+
     def report(self, ticid: int, refresh: bool = False) -> bytes:
-        """Render (and cache) the matplotlib star report PNG."""
+        """Render (and cache) the matplotlib star report PNG.
+
+        The report embeds the DSS2 red tile (fetched through
+        ``sky_cutout`` if not cached; skipped when SkyView is down) and
+        the SPHEREx colour stack.
+        """
         from sx_phot.viz_report import plot_star_report
 
         cache = (self.viz_dir / "reports" / f"{int(ticid) % 1000:03d}"
@@ -613,7 +800,22 @@ class Data:
         sed = None
         if self.has_sed and row.get("teff_full") is not None:
             sed = self.sed_fit(ticid, {})
-        png = plot_star_report(df, row, self.binned_json(ticid), sed)
+        sky_title = "DSS2 red, 3'"
+        try:
+            sky = self.sky_cutout(ticid, "dss2r")
+            meta = self.sky_cutout_meta(ticid, "dss2r") or {}
+            if meta.get("epoch"):
+                sky_title = (f"DSS2 red {meta['epoch']:.1f}, 3' "
+                             f"(pm shift {meta['shift_arcsec']:.1f}\")")
+        except Exception as exc:  # noqa: BLE001 - remote is best effort
+            LOGGER.warning("report TIC %d: dss2r cutout failed: %s", ticid,
+                           exc)
+            sky = None
+        rgb, caption = self.rgb_stack(ticid)
+        png = plot_star_report(df, row, self.binned_json(ticid), sed,
+                               sky_jpeg=sky, sky_title=sky_title,
+                               spx_rgb=rgb, spx_title=caption,
+                               phot=self.config.get("phot"))
         cache.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_suffix(".tmp")
         tmp.write_bytes(png)
@@ -804,6 +1006,13 @@ class Handler(SimpleHTTPRequestHandler):
         elif seg[0] == "cutout" and len(seg) >= 2:
             tic = int(seg[1])
             survey = params.get("survey", ["dss2r"])[-1]
+            if params.get("meta", ["0"])[-1] == "1":
+                meta = d.sky_cutout_meta(tic, survey)
+                if meta is None:
+                    self._error(HTTPStatus.BAD_GATEWAY, "cutout unavailable")
+                else:
+                    self._send_json(meta)
+                return
             body = d.sky_cutout(tic, survey)
             if body is None:
                 self._error(HTTPStatus.BAD_GATEWAY, "cutout unavailable")
@@ -815,6 +1024,15 @@ class Handler(SimpleHTTPRequestHandler):
             body = d.spherex_cutout(tic, key)
             if body is None:
                 self._error(HTTPStatus.NOT_FOUND, "image not available")
+            else:
+                self._send_bytes(body, "image/png")
+        elif seg[0] == "spxrgb" and len(seg) >= 2:
+            tic = int(seg[1].split(".")[0])
+            if tic not in d.row_of:
+                raise KeyError(f"TIC {tic}")
+            body = d.spherex_rgb(tic)
+            if body is None:
+                self._error(HTTPStatus.NOT_FOUND, "images not available")
             else:
                 self._send_bytes(body, "image/png")
         elif seg[0] == "report" and len(seg) >= 2:
