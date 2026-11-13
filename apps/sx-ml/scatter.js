@@ -61,6 +61,130 @@
     return sh;
   }
 
+  /* Uniform grid over interleaved (x, y) points: nearest visible point
+   * and point-in-polygon queries.  Shared by the UMAP scatter and the
+   * HR-diagram panel. */
+  class GridIndex {
+    constructor(xy, n) {
+      this.xy = xy;
+      this.n = n;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const x = xy[2 * i], y = xy[2 * i + 1];
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      if (!Number.isFinite(x0)) { x0 = -1; x1 = 1; y0 = -1; y1 = 1; }
+      const pad = 1e-6 * Math.max(x1 - x0, y1 - y0, 1e-9);
+      this.bbox = { x0: x0 - pad, x1: x1 + pad, y0: y0 - pad, y1: y1 + pad };
+      const G = Math.max(16, Math.min(1024, Math.ceil(Math.sqrt(n / 4))));
+      this.G = G;
+      const counts = new Uint32Array(G * G + 1);
+      const cell = new Int32Array(n).fill(-1);
+      const sx = G / (this.bbox.x1 - this.bbox.x0);
+      const sy = G / (this.bbox.y1 - this.bbox.y0);
+      for (let i = 0; i < n; i++) {
+        const x = xy[2 * i], y = xy[2 * i + 1];
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const cx = Math.min(G - 1, Math.floor((x - this.bbox.x0) * sx));
+        const cy = Math.min(G - 1, Math.floor((y - this.bbox.y0) * sy));
+        const c = cy * G + cx;
+        cell[i] = c;
+        counts[c + 1]++;
+      }
+      for (let c = 0; c < G * G; c++) counts[c + 1] += counts[c];
+      const fill = counts.slice(0, G * G);
+      const order = new Uint32Array(counts[G * G]);
+      for (let i = 0; i < n; i++) {
+        const c = cell[i];
+        if (c < 0) continue;
+        order[fill[c]++] = i;
+      }
+      this.offsets = counts;
+      this.order = order;
+      this.scale = [sx, sy];
+    }
+
+    nearest(dx, dy, rx, ry, flags) {
+      // Nearest point (flags[i] != 0) to (dx, dy) within the ellipse of
+      // semi-axes rx, ry (data units); -1 if none.
+      const G = this.G, [sx, sy] = this.scale, b = this.bbox;
+      const cx0 = Math.max(0, Math.floor((dx - rx - b.x0) * sx));
+      const cx1 = Math.min(G - 1, Math.floor((dx + rx - b.x0) * sx));
+      const cy0 = Math.max(0, Math.floor((dy - ry - b.y0) * sy));
+      const cy1 = Math.min(G - 1, Math.floor((dy + ry - b.y0) * sy));
+      let best = -1, bestD = 1;
+      const xy = this.xy, ix = 1 / rx, iy = 1 / ry;
+      for (let cy = cy0; cy <= cy1; cy++) {
+        for (let cx = cx0; cx <= cx1; cx++) {
+          const c = cy * G + cx;
+          const lo = this.offsets[c], hi = this.offsets[c + 1];
+          for (let k = lo; k < hi; k++) {
+            const i = this.order[k];
+            if (flags && !flags[i]) continue;
+            const ddx = (xy[2 * i] - dx) * ix, ddy = (xy[2 * i + 1] - dy) * iy;
+            const d = ddx * ddx + ddy * ddy;
+            if (d < bestD) { bestD = d; best = i; }
+          }
+        }
+      }
+      return best;
+    }
+
+    pointsInPolygon(poly, flags) {
+      // Ray casting over all points (flags[i] != 0) inside the polygon's
+      // bounding box; poly is [[x, y], ...] in data units.
+      const n = this.n, xy = this.xy;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of poly) {
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+      }
+      const m = poly.length;
+      const px = new Float64Array(m), py = new Float64Array(m);
+      for (let k = 0; k < m; k++) { px[k] = poly[k][0]; py[k] = poly[k][1]; }
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        if (flags && !flags[i]) continue;
+        const x = xy[2 * i], y = xy[2 * i + 1];
+        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+        let inside = false;
+        for (let a = 0, b = m - 1; a < m; b = a++) {
+          if (((py[a] > y) !== (py[b] > y)) &&
+              (x < (px[b] - px[a]) * (y - py[a]) / (py[b] - py[a]) + px[a])) {
+            inside = !inside;
+          }
+        }
+        if (inside) out.push(i);
+      }
+      return Uint32Array.from(out);
+    }
+  }
+
+  /* The red crosshair that marks the loaded star, and the hover ring;
+   * (x, y) in CSS pixels on a context already scaled by the DPR. */
+  function drawMarker(ctx, x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, 2 * Math.PI);
+    ctx.strokeStyle = "#ff5050";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - 16, y); ctx.lineTo(x - 10, y);
+    ctx.moveTo(x + 10, y); ctx.lineTo(x + 16, y);
+    ctx.moveTo(x, y - 16); ctx.lineTo(x, y - 10);
+    ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 16);
+    ctx.stroke();
+  }
+  function drawHover(ctx, x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, 2 * Math.PI);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
   class Scatter {
     constructor(canvas, overlay, opts) {
       this.canvas = canvas;
@@ -202,70 +326,14 @@
 
     // -- spatial index --------------------------------------------------------
     _buildIndex() {
-      const xy = this.xy, n = this.n;
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      for (let i = 0; i < n; i++) {
-        const x = xy[2 * i], y = xy[2 * i + 1];
-        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        if (x < x0) x0 = x; if (x > x1) x1 = x;
-        if (y < y0) y0 = y; if (y > y1) y1 = y;
-      }
-      if (!Number.isFinite(x0)) { x0 = -1; x1 = 1; y0 = -1; y1 = 1; }
-      const pad = 1e-6 * Math.max(x1 - x0, y1 - y0, 1e-9);
-      this.bbox = { x0: x0 - pad, x1: x1 + pad, y0: y0 - pad, y1: y1 + pad };
-      const G = Math.max(16, Math.min(1024, Math.ceil(Math.sqrt(n / 4))));
-      this.G = G;
-      const counts = new Uint32Array(G * G + 1);
-      const cell = new Int32Array(n).fill(-1);
-      const sx = G / (this.bbox.x1 - this.bbox.x0);
-      const sy = G / (this.bbox.y1 - this.bbox.y0);
-      for (let i = 0; i < n; i++) {
-        const x = xy[2 * i], y = xy[2 * i + 1];
-        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        const cx = Math.min(G - 1, Math.floor((x - this.bbox.x0) * sx));
-        const cy = Math.min(G - 1, Math.floor((y - this.bbox.y0) * sy));
-        const c = cy * G + cx;
-        cell[i] = c;
-        counts[c + 1]++;
-      }
-      for (let c = 0; c < G * G; c++) counts[c + 1] += counts[c];
-      const fill = counts.slice(0, G * G);
-      const order = new Uint32Array(counts[G * G]);
-      for (let i = 0; i < n; i++) {
-        const c = cell[i];
-        if (c < 0) continue;
-        order[fill[c]++] = i;
-      }
-      this.gridOffsets = counts;
-      this.gridOrder = order;
-      this.gridScale = [sx, sy];
+      this.index = new GridIndex(this.xy, this.n);
+      this.bbox = this.index.bbox;
     }
 
     nearest(dx, dy, maxDataDist) {
       // Nearest visible point to data coordinates (dx, dy).
-      if (!this.xy) return -1;
-      const G = this.G, [sx, sy] = this.gridScale, b = this.bbox;
-      const r = maxDataDist;
-      const cx0 = Math.max(0, Math.floor((dx - r - b.x0) * sx));
-      const cx1 = Math.min(G - 1, Math.floor((dx + r - b.x0) * sx));
-      const cy0 = Math.max(0, Math.floor((dy - r - b.y0) * sy));
-      const cy1 = Math.min(G - 1, Math.floor((dy + r - b.y0) * sy));
-      let best = -1, bestD = r * r;
-      const xy = this.xy, flags = this.flags;
-      for (let cy = cy0; cy <= cy1; cy++) {
-        for (let cx = cx0; cx <= cx1; cx++) {
-          const c = cy * G + cx;
-          const lo = this.gridOffsets[c], hi = this.gridOffsets[c + 1];
-          for (let k = lo; k < hi; k++) {
-            const i = this.gridOrder[k];
-            if (!flags[i]) continue;
-            const ddx = xy[2 * i] - dx, ddy = xy[2 * i + 1] - dy;
-            const d = ddx * ddx + ddy * ddy;
-            if (d < bestD) { bestD = d; best = i; }
-          }
-        }
-      }
-      return best;
+      if (!this.index) return -1;
+      return this.index.nearest(dx, dy, maxDataDist, maxDataDist, this.flags);
     }
 
     // -- view -----------------------------------------------------------------
@@ -491,26 +559,12 @@
       if (this.hoverIdx >= 0 && this.xy) {
         const s = this.dataToScreen(this.xy[2 * this.hoverIdx],
                                     this.xy[2 * this.hoverIdx + 1]);
-        ctx.beginPath();
-        ctx.arc(s[0], s[1], 7, 0, 2 * Math.PI);
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        drawHover(ctx, s[0], s[1]);
       }
       if (this.marker >= 0 && this.xy) {
         const s = this.dataToScreen(this.xy[2 * this.marker],
                                     this.xy[2 * this.marker + 1]);
-        ctx.beginPath();
-        ctx.arc(s[0], s[1], 10, 0, 2 * Math.PI);
-        ctx.strokeStyle = "#ff5050";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(s[0] - 16, s[1]); ctx.lineTo(s[0] - 10, s[1]);
-        ctx.moveTo(s[0] + 10, s[1]); ctx.lineTo(s[0] + 16, s[1]);
-        ctx.moveTo(s[0], s[1] - 16); ctx.lineTo(s[0], s[1] - 10);
-        ctx.moveTo(s[0], s[1] + 10); ctx.lineTo(s[0], s[1] + 16);
-        ctx.stroke();
+        drawMarker(ctx, s[0], s[1]);
       }
     }
 
@@ -521,7 +575,7 @@
       const el = this.overlay;
       el.style.touchAction = "none";
       el.addEventListener("pointerdown", (e) => {
-        el.setPointerCapture(e.pointerId);
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
         const [dx, dy] = this.screenToData(e.offsetX, e.offsetY);
         if (e.shiftKey) {
           this.lasso = [[dx, dy]];
@@ -590,33 +644,15 @@
     }
 
     pointsInPolygon(poly) {
-      // Ray casting over all visible points inside the polygon's bbox.
-      const n = this.n, xy = this.xy, flags = this.flags;
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      for (const p of poly) {
-        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
-        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
-      }
-      const m = poly.length;
-      const px = new Float64Array(m), py = new Float64Array(m);
-      for (let k = 0; k < m; k++) { px[k] = poly[k][0]; py[k] = poly[k][1]; }
-      const out = [];
-      for (let i = 0; i < n; i++) {
-        if (!flags[i]) continue;
-        const x = xy[2 * i], y = xy[2 * i + 1];
-        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-        let inside = false;
-        for (let a = 0, b = m - 1; a < m; b = a++) {
-          if (((py[a] > y) !== (py[b] > y)) &&
-              (x < (px[b] - px[a]) * (y - py[a]) / (py[b] - py[a]) + px[a])) {
-            inside = !inside;
-          }
-        }
-        if (inside) out.push(i);
-      }
-      return Uint32Array.from(out);
+      // Visible points inside the lasso polygon (data units).
+      if (!this.index) return new Uint32Array(0);
+      return this.index.pointsInPolygon(poly, this.flags);
     }
   }
 
+  Scatter.GridIndex = GridIndex;
+  Scatter.drawMarker = drawMarker;
+  Scatter.drawHover = drawHover;
   window.Scatter = Scatter;
+  window.GridIndex = GridIndex;
 })();

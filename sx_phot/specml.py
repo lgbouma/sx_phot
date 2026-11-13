@@ -924,18 +924,20 @@ def assemble_library(
 # Clean-sample selection
 # ---------------------------------------------------------------------------
 
-def main_sequence_offset(bprp0: np.ndarray, mg0: np.ndarray,
-                         n_bins: int = 60) -> np.ndarray:
-    """M_G0 minus the running median main sequence at each BP-RP0.
+def main_sequence_curve(bprp0: np.ndarray, mg0: np.ndarray,
+                        n_bins: int = 60) -> tuple[np.ndarray, np.ndarray]:
+    """Running-median main sequence M_G0(BP-RP0) of a sample.
 
-    Positive values are fainter than the sequence.  NaN where the
-    inputs are missing or outside the populated colour range.
+    The colour range is split into ``n_bins`` quantile bins; the median
+    M_G0 per bin is refit after clipping stars more than 1 mag from the
+    first-pass median.  Returns the bin centres and medians (empty when
+    fewer than 100 stars have both values).
     """
     bprp0 = np.asarray(bprp0, dtype=float)
     mg0 = np.asarray(mg0, dtype=float)
     ok = np.isfinite(bprp0) & np.isfinite(mg0)
     if ok.sum() < 100:
-        return np.full(len(bprp0), np.nan)
+        return np.array([]), np.array([])
     edges = np.quantile(bprp0[ok], np.linspace(0, 1, n_bins + 1))
     edges[0] -= 1e-6
     edges[-1] += 1e-6
@@ -951,9 +953,24 @@ def main_sequence_offset(bprp0: np.ndarray, mg0: np.ndarray,
                      if ((idx == k) & close).any() else np.nan
                      for k in range(n_bins)])
     good = np.isfinite(med2)
-    ms = np.interp(bprp0[ok], centers[good], med2[good])
+    return centers[good], med2[good]
+
+
+def main_sequence_offset(bprp0: np.ndarray, mg0: np.ndarray,
+                         n_bins: int = 60) -> np.ndarray:
+    """M_G0 minus the running median main sequence at each BP-RP0.
+
+    Positive values are fainter than the sequence.  NaN where the
+    inputs are missing or outside the populated colour range.
+    """
+    bprp0 = np.asarray(bprp0, dtype=float)
+    mg0 = np.asarray(mg0, dtype=float)
+    centers, med = main_sequence_curve(bprp0, mg0, n_bins)
     out = np.full(len(bprp0), np.nan)
-    out[ok] = mg0[ok] - ms
+    if not len(centers):
+        return out
+    ok = np.isfinite(bprp0) & np.isfinite(mg0)
+    out[ok] = mg0[ok] - np.interp(bprp0[ok], centers, med)
     return out
 
 

@@ -1,12 +1,21 @@
 # sx-ml
 
-Machine-learning views of the bulk SPHEREx spectra of the TARS rotators:
+Machine-learning views of the bulk SPHEREx spectra of the TARS stars:
 an empirical one-parameter spectral sequence (template library), fits of
 that library to every star (single, binary, disk), UMAP embeddings of the
 spectral shapes and of the residuals, and two web pages to explore them.
 Same design as `apps/sx-viz`: static HTML/JS, a stdlib
 `ThreadingHTTPServer`, JSON and binary endpoints, no framework.  Star pages
 link to sx-viz (port 8051).
+
+The server holds several datasets (`datasets.json`): the TARS table 2
+rotators (`/ar0/SPHEREX/bulkphot/tars_v0`, the default) and all TARS
+table 4 targets (T < 16, d < 500 pc; `/ar0/SPHEREX/bulkphot/tars4_v0`),
+both fitted with the table 2 library so the fit columns are on one scale.
+A dataset whose products are still being built is listed as pending and
+loaded automatically once its files are complete and have been quiet for
+ten minutes (checked every five), so a server started mid-pipeline needs
+no restart.
 
 ## Products (`<run>/ml`)
 
@@ -98,18 +107,44 @@ apps/sx-ml/scripts/ensure_server.sh
 ```
 
 Re-run after each viz rebuild (the fits and embeddings depend on the
-binned spectra).  The server loads everything at start-up (~40 s) and
-must be restarted to see new products.
+binned spectra).  With `--datasets` the running server notices rebuilt
+products (newest file at least 10 min old) and reloads the dataset in
+the background; without it, restart the server.
+
+### Table 4 (all TARS targets)
+
+The table 4 star list is published per sector; the one-row-per-star
+catalog with the Gaia columns and the table 2 rotation columns
+(`in_table2`, `adopted_period`, ...; `final_n_contams` is the sector
+minimum of `num_contams`, which is table 2's definition) is made by
+
+```bash
+$PY drivers/make_tars4_catalog.py --out /ar0/local/TARS/zenodo_19917941/tars_table_4_stars.parquet
+```
+
+Then the viz build (same driver as table 2, 48 workers ~1 h for 7306
+buckets), and `scripts/run_tars4_ml.sh`, which waits for `viz/viz.json`,
+copies nothing (the table 2 library sits in `tars4_v0/ml`, see
+`sequence_provenance.txt` there), fits every star and runs the two
+embeddings in parallel.  Both steps run under `systemd-run --user -p
+MemoryMax=120G -p MemorySwapMax=0`.
 
 ## Server
 
 ```bash
-$PY apps/sx-ml/server.py --run-dir $RUN --port 8052
+$PY apps/sx-ml/server.py --datasets apps/sx-ml/datasets.json --port 8052
+$PY apps/sx-ml/server.py --run-dir $RUN --port 8052      # one dataset
 ```
+
+`datasets.json`: `{"sxviz_dataset": "tars2", "datasets": [{"name",
+"label", "run_dir", "tars", "viz_dir"?, "ml_dir"?}, ...]}`; the first
+entry is the default and `sxviz_dataset` names the one whose stars sx-viz
+serves (other datasets link only those stars).  Every endpoint takes
+`?ds=<name>`.
 
 | Endpoint | Returns |
 | --- | --- |
-| `/api/meta` | counts, column list with ranges and notes, embeddings, UMAP settings |
+| `/api/meta` | counts, column list with ranges and notes, embeddings, UMAP settings, `datasets` (with `ready`), `pending`, `mainseq` (running-median main sequence M_G0(BP-RP0) of the sample) |
 | `/api/points?emb=shape` | float32 LE, 2 N: x0 y0 x1 y1 ... (NaN where not embedded) |
 | `/api/col/<name>` | float32 LE, N values of a table column |
 | `/api/ticids` | uint32 LE, N |
@@ -119,14 +154,18 @@ $PY apps/sx-ml/server.py --run-dir $RUN --port 8052
 | `/api/sequence/at?t=&n=&source=&seed=` | template at `t`, model atmosphere at the mapped Teff, example stars (training set, or `source=all`) |
 
 Log: `~/local/sx-ml/server.log`.  `SX_VIZ_URL` (default `http://wh3:8051`)
-sets the sx-viz link base.
+and `SX_TARVIZ_URL` (default `http://lcviz.lgbouma.com:8056`) set the
+sx-viz and tar-viz link bases; both links are made for the stars of the
+`sxviz_dataset` (the TARS rotators).
 
 ## Pages
 
 **umap.html**: WebGL2 scatter of all embedded stars (custom renderer,
 `scatter.js`; no library; without WebGL2 it falls back to splatting the
 points into a 2D canvas, ~150 ms per redraw for 1e6 points, and says so
-in the HUD).  Script errors are shown in the status bar.  Sidebar: embedding, colour column (any
+in the HUD).  Script errors are shown in the status bar.  Sidebar: sample
+(one button per dataset; switching keeps the embedding, colour column,
+filter and star where the new dataset has them), embedding, colour column (any
 numeric column; searchable), colour range and map, point size and
 opacity, a range filter on any column, TIC lookup.  Drag pans, wheel
 zooms, click loads the star (binned dereddened spectrum with the single /
@@ -136,6 +175,17 @@ shows the median residual from each star's own single template with the
 16-84 % band, the median normalized spectrum against the template at the
 median `t`, the `t` histogram and column medians; CSV export of the
 selected rows.  View state is in the URL hash.
+
+Lower left, **Gaia CMD** (`hrpanel.js`): M_G0 vs BP-RP0 (TARS,
+dereddened) of the shown stars as a log-density image, re-binned at every
+redraw on a 2 px grid, with the running-median main sequence (dashed)
+and the equal-mass-binary line 0.75 mag above it (dotted).  The loaded
+star carries the same red crosshair as the map, a lasso selection is
+drawn as points, and the panel has the map's interactions: drag, wheel,
+shift+drag lasso (selects in the CMD, shown in the map), click to load the
+nearest shown star, double click or `fit` to reset.  `mean colour` colours
+each cell by the mean of the current colour column (density as
+brightness).  `hide` collapses the panel (remembered).
 
 **sequence.html**: slider along the sequence in arc length (equal
 spectral change per step), `t` (equal numbers of stars) or Teff; shows

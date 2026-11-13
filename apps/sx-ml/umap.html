@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="styles.css">
 <script src="vendor/plotly.min.js"></script>
 <script src="scatter.js"></script>
+<script src="hrpanel.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -16,7 +17,13 @@
   <span class="small muted">drag: pan · wheel: zoom · shift+drag: lasso · click: star · <b>r</b> random · <b>f</b> fit view</span>
 </div>
 <div class="umap-layout">
+  <div class="leftcol">
   <div class="sidebar">
+    <div id="dssection" class="hidden">
+      <h3>Sample</h3>
+      <div class="tabs" id="dsbtns"></div>
+      <div class="small muted" id="dsnote"></div>
+    </div>
     <h3>Embedding</h3>
     <select id="emb"></select>
     <label>colour by</label>
@@ -60,6 +67,17 @@
     <div class="row"><button id="selclear">clear</button><button id="selcsv">CSV</button><button id="selzoom">zoom</button></div>
     <h3>Link</h3>
     <div class="small"><a id="permalink" href="#">permalink to this view</a></div>
+  </div>
+  <div class="hrpanel" id="hrpanel">
+    <div class="row hrhead">
+      <span class="small muted" title="Gaia DR3 absolute G vs BP-RP, dereddened (TARS); dashed: running-median main sequence, dotted: 0.75 mag above it (equal-mass pair)">Gaia CMD · <span id="hrcount"></span></span>
+      <span style="flex:1"></span>
+      <select id="hrmode" class="small" title="cell colour: star density, or the mean of the colour column"><option value="density">density</option><option value="mean">mean colour</option></select>
+      <button id="hrfit" class="small" title="reset the view (or double click)">fit</button>
+      <button id="hrhide" class="small" title="show / hide the CMD panel">hide</button>
+    </div>
+    <div class="hrwrap" id="hrwrap"><div class="tooltip" id="hrtip"></div></div>
+  </div>
   </div>
   <div class="plotwrap">
     <canvas id="glcanvas"></canvas>

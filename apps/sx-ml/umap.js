@@ -1,9 +1,12 @@
 /* sx-ml UMAP explorer: WebGL scatter of ~1e6 spectra, colour by any column,
- * star panel (binned spectrum + empirical template fits), lasso selections. */
+ * star panel (binned spectrum + empirical template fits), lasso selections,
+ * a Gaia colour-magnitude panel linked to the map, and a switch between the
+ * datasets the server holds (e.g. TARS rotators vs all TARS targets). */
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
   const API = "api/";
+  const TARVIZ = "http://lcviz.lgbouma.com:8056";
   const showError = (msg) => {
     $("status").textContent = "error: " + msg;
     $("hud").textContent = "error: " + msg;
@@ -18,6 +21,7 @@
     turbo: [[48,18,59],[70,107,227],[40,180,240],[31,228,181],[110,251,98],[197,239,51],[253,186,43],[246,112,22],[205,42,6],[122,4,3]],
     coolwarm: [[59,76,192],[98,130,234],[141,176,254],[184,208,249],[221,221,221],[245,196,173],[244,154,123],[222,96,77],[180,4,38]],
     grey: [[30,30,30],[235,235,235]],
+    density: [[62,64,84],[118,122,150],[190,195,215],[250,250,252]],
   };
   const LUTS = {};
   function lut(name, flip) {
@@ -38,44 +42,69 @@
   }
 
   const state = {
-    meta: null, emb: null, col: null, values: null, ticids: null,
+    meta: null, ds: null, datasets: [], emb: null, col: null, values: null, ticids: null,
     vmin: null, vmax: null, cmap: "viridis", flip: false, logc: false,
     selection: null, flags: null, filter: null, star: null, colCache: {},
-    hoverCols: ["teff_emp", "teff_tars", "bprp0", "tmag", "dbic_binary", "red_excess"],
+    hoverCols: ["teff_emp", "teff_tars", "bprp0", "mg0", "tmag", "dbic_binary", "red_excess"],
   };
   try { state.specLegend = localStorage.getItem("sxml.specLegend") !== "0"; } catch (e) { state.specLegend = true; }
+  try { state.hrShown = localStorage.getItem("sxml.hr") !== "0"; } catch (e) { state.hrShown = true; }
   function setSpecLegend(on) {
     state.specLegend = on;
     $("speclegend").textContent = on ? "hide legend" : "show legend";
     try { localStorage.setItem("sxml.specLegend", on ? "1" : "0"); } catch (e) { /* private mode */ }
     if ($("spec").data) Plotly.relayout($("spec"), { showlegend: on });
   }
+  function setHRShown(on) {
+    state.hrShown = on;
+    $("hrhide").textContent = on ? "hide" : "show";
+    $("hrwrap").classList.toggle("hidden", !on);
+    try { localStorage.setItem("sxml.hr", on ? "1" : "0"); } catch (e) { /* private mode */ }
+    if (on) hr.resize();
+  }
 
-  let scatter;
+  let scatter, hr;
   try {
     scatter = new Scatter($("glcanvas"), $("overlay"), {
-      onHover: onHover, onClick: (i) => loadStar(i), onLasso: onLasso,
+      onHover: (i, e) => showTip(i, e, $("tooltip"), $("overlay")),
+      onClick: (i) => loadStar(i), onLasso: onLasso,
+    });
+    hr = new HRPanel($("hrwrap"), {
+      onHover: (i, e) => showTip(i, e, $("hrtip"), $("hrwrap")),
+      onClick: (i) => loadStar(i), onLasso: onLasso,
+      onDraw: (n) => { $("hrcount").textContent = n.toLocaleString() + " in view"; },
+      lut: lut("density"),
     });
   } catch (err) {
     showError(err.message + " (the UMAP page needs WebGL2)");
     throw err;
   }
   window.sxScatter = scatter;  // for debugging from the console
+  window.sxHR = hr;
 
   // ---- helpers ------------------------------------------------------------
-  async function getJSON(url) {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  function url(path, params) {
+    const p = new URLSearchParams(params || {});
+    if (state.ds) p.set("ds", state.ds);
+    const q = p.toString();
+    return API + path + (q ? "?" + q : "");
+  }
+  async function getJSON(u) {
+    const r = await fetch(u);
+    if (!r.ok) throw new Error(`${u}: ${r.status}`);
     return r.json();
   }
-  async function getF32(url) {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  async function getF32(u) {
+    const r = await fetch(u);
+    if (!r.ok) throw new Error(`${u}: ${r.status}`);
     return new Float32Array(await r.arrayBuffer());
   }
   async function getColumn(name) {
-    if (!state.colCache[name]) state.colCache[name] = await getF32(API + "col/" + name);
+    if (!state.colCache[name]) state.colCache[name] = await getF32(url("col/" + name));
     return state.colCache[name];
+  }
+  function hasColumn(name) {
+    return !!(state.meta && state.meta.columns.find((c) => c.name === name));
   }
   function fmt(v, col) {
     if (v === null || v === undefined || Number.isNaN(v)) return "";
@@ -128,6 +157,7 @@
       rgb[3 * i] = L[k]; rgb[3 * i + 1] = L[k + 1]; rgb[3 * i + 2] = L[k + 2];
     }
     scatter.setColors(rgb);
+    hr.setColor(v, state.vmin, state.vmax, L, state.logc);
     drawColorbar();
     updateHash();
   }
@@ -164,9 +194,9 @@
     state.emb = name;
     $("emb").value = name;
     setStatus(`loading embedding ${name}…`);
-    const xy = await getF32(API + "points?emb=" + name);
+    const xy = await getF32(url("points", { emb: name }));
     scatter.setPoints(xy);
-    if (state.flags) applyFilter(false);
+    if (state.flags) await applyFilter(false);
     if (state.selection) scatter.setSelection(state.selection);
     setStatus(`${state.meta.n.toLocaleString()} stars · ${name}`);
     updateHash();
@@ -197,31 +227,35 @@
       $("fstatus").textContent = "";
     }
     state.flags = flags;
-    scatter.setFlags(flags);
+    scatter.setFlags(flags);   // zeroes the stars without embedding coordinates
+    hr.setFlags(flags);
     updateHash();
   }
 
   // ---- hover / star ----------------------------------------------------------------
   let hoverVals = {};
   async function prepHoverCols() {
+    hoverVals = {};
     for (const c of state.hoverCols) {
-      if (state.meta.columns.find((m) => m.name === c)) hoverVals[c] = await getColumn(c);
+      if (hasColumn(c)) hoverVals[c] = await getColumn(c);
     }
   }
-  function onHover(i, e) {
-    const tip = $("tooltip");
+  function showTip(i, e, tip, anchor) {
     if (i < 0) { tip.style.display = "none"; return; }
     const parts = [`TIC ${state.ticids ? state.ticids[i] : i}`];
     if (state.values) parts.push(`${state.col}=${fmt(state.values[i], state.col)}`);
     for (const c of Object.keys(hoverVals)) if (c !== state.col) parts.push(`${c}=${fmt(hoverVals[c][i], c)}`);
     tip.innerHTML = parts.join("<br>");
     tip.style.display = "block";
-    const rect = $("overlay").getBoundingClientRect();
-    tip.style.left = (e.clientX - rect.left + 14) + "px";
-    tip.style.top = (e.clientY - rect.top + 10) + "px";
+    const rect = anchor.getBoundingClientRect();
+    let left = e.clientX - rect.left + 14, top = e.clientY - rect.top + 10;
+    if (left + 150 > rect.width) left = Math.max(0, e.clientX - rect.left - 160);
+    if (top + 20 * parts.length > rect.height) top = Math.max(0, e.clientY - rect.top - 16 * parts.length - 10);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
   }
 
-  const SHOW_INFO = ["ticid", "teff_emp", "teff_tars", "bprp0", "mg0", "dms", "dmag_ms",
+  const SHOW_INFO = ["ticid", "in_table2", "teff_emp", "teff_tars", "bprp0", "mg0", "dms", "dmag_ms",
     "tmag", "plx", "a0", "ruwe", "nss", "n_contams", "period", "amplitude", "med_snr",
     "n_bins_used", "chi2_red", "red_excess", "red_excess_sig", "blue_excess",
     "dbic_binary", "dbic_binary_pct", "teff_bin1", "teff_bin2", "flux_ratio_binary",
@@ -233,11 +267,16 @@
     if (i < 0) return;
     showTab("star");
     scatter.setMarker(i);
-    const s = await getJSON(API + "star/" + i);
+    hr.setMarker(i);
+    const s = await getJSON(url("star/" + i));
     state.star = s;
     const info = s.info;
-    $("startitle").innerHTML = `<b>TIC ${s.ticid}</b> · row ${s.row} · ` +
-      `<a href="${s.links.sxviz}" target="_blank">sx-viz star page</a>` +
+    const links = s.links || {};
+    // Older servers send no tar-viz link: build it for the TARS rotators.
+    if (!links.tarviz && links.sxviz) links.tarviz = `${TARVIZ}/star.html?ticid=${s.ticid}`;
+    $("startitle").innerHTML = `<b>TIC ${s.ticid}</b>` +
+      (links.sxviz ? ` · <a href="${links.sxviz}" target="_blank">sx-viz page</a>` : "") +
+      (links.tarviz ? ` · <a href="${links.tarviz}" target="_blank">tar-viz page</a>` : "") +
       (info.teff_emp ? ` · Teff_emp ${fmt(info.teff_emp, "teff")} K` : "");
     plotStar(s);
     const tbl = $("starinfo");
@@ -249,6 +288,15 @@
       tbl.appendChild(tr);
     }
     updateHash();
+  }
+
+  function clearStar() {
+    state.star = null;
+    scatter.setMarker(-1);
+    hr.setMarker(-1);
+    $("startitle").textContent = "click a point";
+    $("starinfo").innerHTML = "";
+    for (const id of ["spec", "resid"]) if ($(id).data) Plotly.purge($(id));
   }
 
   function plotStar(s) {
@@ -310,10 +358,11 @@
     if (!indices.length) return;
     state.selection = indices;
     scatter.setSelection(indices);
+    hr.setSelection(indices);
     $("selinfo").textContent = `${indices.length.toLocaleString()} stars`;
     showTab("sel");
     $("seltitle").textContent = `computing statistics for ${indices.length.toLocaleString()} stars…`;
-    const r = await fetch(API + "selection", { method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await fetch(url("selection"), { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rows: Array.from(indices.length > 200000 ? indices.subarray(0, 200000) : indices) }) });
     const s = await r.json();
     state.selStats = s;
@@ -363,6 +412,7 @@
   function clearSelection() {
     state.selection = null;
     scatter.setSelection(null);
+    hr.setSelection(null);
     $("selinfo").textContent = "none";
     $("seltitle").textContent = "shift+drag to lasso a group";
   }
@@ -376,7 +426,7 @@
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `sxml_selection_${state.emb}_${state.selection.length}.csv`;
+    a.download = `sxml_selection_${state.ds}_${state.emb}_${state.selection.length}.csv`;
     a.click();
   }
 
@@ -403,13 +453,14 @@
   // ---- URL state ---------------------------------------------------------------------
   function updateHash() {
     const p = new URLSearchParams();
+    if (state.ds) p.set("ds", state.ds);
     if (state.emb) p.set("emb", state.emb);
     if (state.col) p.set("col", state.col);
     if (state.vmin !== null) { p.set("vmin", fmt(state.vmin)); p.set("vmax", fmt(state.vmax)); }
     p.set("cmap", state.cmap + (state.flip ? "_r" : ""));
     if (state.logc) p.set("log", "1");
     if (state.filter) { p.set("fcol", state.filter.col); if (Number.isFinite(state.filter.min)) p.set("fmin", state.filter.min); if (Number.isFinite(state.filter.max)) p.set("fmax", state.filter.max); }
-    if (state.star) p.set("row", state.star.row);
+    if (state.star) { p.set("row", state.star.row); p.set("tic", state.star.ticid); }
     history.replaceState(null, "", "#" + p.toString());
     $("permalink").href = "#" + p.toString();
   }
@@ -417,52 +468,135 @@
     return new URLSearchParams(location.hash.slice(1));
   }
 
-  // ---- init ---------------------------------------------------------------------------------
-  async function init() {
-    const meta = await getJSON(API + "meta");
+  // ---- datasets ------------------------------------------------------------------------
+  function buildDatasetButtons() {
+    // The Sample section appears only when there is a choice to make:
+    // datasets still being built are not shown.
+    const box = $("dsbtns");
+    box.innerHTML = "";
+    const ready = state.datasets.filter((d) => d.ready !== false);
+    $("dssection").classList.toggle("hidden", ready.length < 2);
+    for (const d of ready) {
+      const b = document.createElement("button");
+      b.className = "ds";
+      b.dataset.name = d.name;
+      b.textContent = d.label;
+      b.title = `${d.n.toLocaleString()} stars · ${d.run_dir || ""}`;
+      b.addEventListener("click", () => {
+        if (d.name !== state.ds) loadDataset(d.name).catch((err) => showError(err.message));
+      });
+      box.appendChild(b);
+    }
+    markDatasetButtons();
+  }
+  function markDatasetButtons() {
+    for (const b of $("dsbtns").children) b.classList.toggle("active", b.dataset.name === state.ds);
+  }
+
+  function fillSelect(sel, names, first) {
+    sel.innerHTML = "";
+    if (first) { const o = document.createElement("option"); o.value = ""; o.textContent = first; sel.appendChild(o); }
+    for (const n of names) { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); }
+  }
+
+  /* Load (or switch to) a dataset.  `h` are the URL-hash parameters,
+   * honoured on the first load only; on a switch the current embedding,
+   * colour column, filter and star are kept where they exist. */
+  async function loadDataset(name, h, meta) {
+    const prevTic = state.star ? state.star.ticid : (h && h.get("tic") ? parseInt(h.get("tic"), 10) : null);
+    state.ds = name;
+    if (!meta) meta = await getJSON(url("meta"));
     state.meta = meta;
-    const h = readHash();
+    state.colCache = {};
+    state.values = null;
+    state.flags = null;
+    state.ticids = null;
+    hoverVals = {};
+    clearSelection();
+    clearStar();
+    markDatasetButtons();
+    $("dsnote").textContent = `${meta.n.toLocaleString()} stars` + (meta.run_dir ? ` · ${meta.run_dir.split("/").slice(-1)[0]}` : "");
     const embSel = $("emb");
+    embSel.innerHTML = "";
     for (const e of meta.embeddings) {
       const o = document.createElement("option");
       o.value = e.name; o.textContent = `${e.name} (${e.n.toLocaleString()})`;
       embSel.appendChild(o);
     }
+    const names = meta.columns.map((c) => c.name).sort();
+    fillSelect($("col"), names);
+    fillSelect($("collist"), names);
+    fillSelect($("fcol"), names, "(none)");
     if (!meta.embeddings.length) {
       setStatus("no embeddings yet: run drivers/run_umap.py");
       $("hud").textContent = "no umap_*.npy found in the ml directory";
       return;
     }
-    const colSel = $("col"), list = $("collist"), fcol = $("fcol");
-    const names = meta.columns.map((c) => c.name).sort();
-    for (const n of names) {
-      const o = document.createElement("option"); o.value = n; o.textContent = n; colSel.appendChild(o);
-      const o2 = document.createElement("option"); o2.value = n; list.appendChild(o2);
-      const o3 = document.createElement("option"); o3.value = n; o3.textContent = n; fcol.appendChild(o3);
+    state.ticids = new Uint32Array(await (await fetch(url("ticids"))).arrayBuffer());
+    if (h) {
+      const cm = h.get("cmap") || "viridis";
+      state.flip = cm.endsWith("_r"); state.cmap = cm.replace(/_r$/, ""); $("cmap").value = state.cmap;
+      state.logc = h.get("log") === "1"; $("logc").checked = state.logc;
     }
-    state.ticids = new Uint32Array(await (await fetch(API + "ticids")).arrayBuffer());
-    const cm = h.get("cmap") || "viridis";
-    state.flip = cm.endsWith("_r"); state.cmap = cm.replace(/_r$/, ""); $("cmap").value = state.cmap;
-    state.logc = h.get("log") === "1"; $("logc").checked = state.logc;
-    await setEmbedding(h.get("emb") && meta.embeddings.find((e) => e.name === h.get("emb")) ? h.get("emb") : meta.embeddings[0].name);
-    const defCol = h.get("col") || (names.includes("teff_emp") ? "teff_emp" : names.includes("teff_tars") ? "teff_tars" : names[0]);
+    const embNames = meta.embeddings.map((e) => e.name);
+    const wantEmb = (h && h.get("emb")) || state.emb;
+    await setEmbedding(embNames.includes(wantEmb) ? wantEmb
+      : embNames.includes("shape") ? "shape" : embNames[0]);
+    const wantCol = (h && h.get("col")) || state.col;
+    const defCol = names.includes(wantCol) ? wantCol
+      : names.includes("teff_emp") ? "teff_emp" : names.includes("teff_tars") ? "teff_tars" : names[0];
     await setColumn(defCol);
-    if (h.get("vmin") !== null && h.get("vmax") !== null) {
+    if (h && h.get("vmin") !== null && h.get("vmax") !== null) {
       state.vmin = parseFloat(h.get("vmin")); state.vmax = parseFloat(h.get("vmax"));
       $("vmin").value = state.vmin; $("vmax").value = state.vmax; applyColors();
     }
-    if (h.get("fcol")) {
+    let fromUI = false;
+    if (h && h.get("fcol")) {
       $("fcol").value = h.get("fcol"); $("fmin").value = h.get("fmin") || ""; $("fmax").value = h.get("fmax") || "";
-      await applyFilter(true);
+      fromUI = true;
+    } else if (state.filter) {
+      if (names.includes(state.filter.col)) { $("fcol").value = state.filter.col; }
+      else { state.filter = null; $("fcol").value = ""; $("fmin").value = ""; $("fmax").value = ""; }
+    }
+    await applyFilter(fromUI);
+    // Gaia CMD panel.
+    if (hasColumn("bprp0") && hasColumn("mg0")) {
+      hr.setData(await getColumn("bprp0"), await getColumn("mg0"));
+      hr.setFlags(state.flags);
+      hr.setMainSequence(meta.mainseq || null);
+      if (state.values) hr.setColor(state.values, state.vmin, state.vmax, lut(state.cmap, state.flip), state.logc);
+    } else {
+      hr.setData(new Float32Array(0), new Float32Array(0));
+      $("hrcount").textContent = "no Gaia columns";
     }
     prepHoverCols();
-    if (h.get("row")) loadStar(parseInt(h.get("row"), 10));
     $("hud").textContent = `UMAP (${meta.umap.n_pc || "?"} PCs, n_neighbors=${meta.umap.n_neighbors || "?"}, min_dist=${meta.umap.min_dist || "?"})` + (scatter.mode === "canvas2d" ? " · 2D canvas renderer (no WebGL2)" : "");
+    if (h && h.get("row") && !prevTic) loadStar(parseInt(h.get("row"), 10));
+    else if (prevTic) findTic(prevTic, false);
+    updateHash();
+  }
 
-    // Controls.
-    embSel.addEventListener("change", () => setEmbedding(embSel.value));
-    colSel.addEventListener("change", () => setColumn(colSel.value));
-    $("colsearch").addEventListener("change", () => { if (names.includes($("colsearch").value)) setColumn($("colsearch").value); });
+  // ---- init ---------------------------------------------------------------------------------
+  async function init() {
+    const h = readHash();
+    let meta;
+    try {
+      meta = await getJSON(API + "meta" + (h.get("ds") ? "?ds=" + encodeURIComponent(h.get("ds")) : ""));
+    } catch (err) {
+      meta = await getJSON(API + "meta");
+    }
+    state.datasets = meta.datasets || [{ name: meta.name || "", label: "all stars", n: meta.n }];
+    buildDatasetButtons();
+    bindControls();
+    setSpecLegend(state.specLegend);
+    setHRShown(state.hrShown);
+    await loadDataset(meta.name || state.datasets[0].name, h, meta);
+  }
+
+  function bindControls() {
+    $("emb").addEventListener("change", () => setEmbedding($("emb").value));
+    $("col").addEventListener("change", () => setColumn($("col").value));
+    $("colsearch").addEventListener("change", () => { if (hasColumn($("colsearch").value)) setColumn($("colsearch").value); });
     $("vmin").addEventListener("change", () => { state.vmin = parseFloat($("vmin").value); applyColors(); });
     $("vmax").addEventListener("change", () => { state.vmax = parseFloat($("vmax").value); applyColors(); });
     $("autorange").addEventListener("click", () => { autoRange(); applyColors(); });
@@ -473,15 +607,17 @@
     $("alpha").addEventListener("input", () => { $("alphaval").textContent = $("alpha").value; scatter.setAlpha(parseFloat($("alpha").value)); });
     $("fapply").addEventListener("click", () => applyFilter(true));
     $("fclear").addEventListener("click", () => { $("fcol").value = ""; $("fmin").value = ""; $("fmax").value = ""; applyFilter(true); });
-    $("go").addEventListener("click", findTic);
-    $("tic").addEventListener("keydown", (e) => { if (e.key === "Enter") findTic(); });
+    $("go").addEventListener("click", () => findTic(parseInt($("tic").value, 10), true));
+    $("tic").addEventListener("keydown", (e) => { if (e.key === "Enter") findTic(parseInt($("tic").value, 10), true); });
     $("selclear").addEventListener("click", clearSelection);
     $("selcsv").addEventListener("click", selectionCSV);
     $("selzoom").addEventListener("click", zoomSelection);
     $("tab-star").addEventListener("click", () => showTab("star"));
     $("tab-sel").addEventListener("click", () => showTab("sel"));
     $("speclegend").addEventListener("click", () => setSpecLegend(!state.specLegend));
-    setSpecLegend(state.specLegend);
+    $("hrhide").addEventListener("click", () => setHRShown(!state.hrShown));
+    $("hrfit").addEventListener("click", () => hr.fitView());
+    $("hrmode").addEventListener("change", () => hr.setMode($("hrmode").value));
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
       if (e.key === "f") scatter.fitView();
@@ -490,15 +626,14 @@
     });
   }
 
-  async function findTic() {
-    const tic = parseInt($("tic").value, 10);
+  async function findTic(tic, center) {
     if (!tic) return;
     try {
-      const s = await getJSON(API + "star/" + tic + "?by=ticid");
+      const s = await getJSON(url("star/" + tic, { by: "ticid" }));
       const xy = s.embedding[state.emb];
-      if (xy && xy[0] !== null) scatter.centerOn(s.row, Math.min(scatter.view.half, 2));
+      if (center && xy && xy[0] !== null) scatter.centerOn(s.row, Math.min(scatter.view.half, 2));
       loadStar(s.row);
-    } catch (err) { setStatus(`TIC ${tic} not found`); }
+    } catch (err) { setStatus(`TIC ${tic} not in this sample`); }
   }
 
   function randomStar() {

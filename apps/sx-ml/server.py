@@ -18,8 +18,13 @@ from ``drivers/build_spectral_sequence.py``, ``empfit.parquet`` from
 * ``GET /api/sequence/at?t=&n=&a1=``   template at ``t``, model
   comparison, example stars
 
+Several datasets (e.g. the TARS rotators and all TARS targets) can be
+served at once from a JSON config (``datasets.json``); every endpoint
+takes ``?ds=<name>`` and ``/api/meta`` lists the datasets.
+
 Usage:
     python server.py --run-dir /ar0/SPHEREX/bulkphot/tars_v0 --port 8052
+    python server.py --datasets datasets.json --port 8052
 """
 
 from __future__ import annotations
@@ -54,6 +59,9 @@ LOGGER = logging.getLogger("sx-ml")
 MAX_SELECTION = 200000
 MAX_BODY_BYTES = 4_000_000
 DEFAULT_SXVIZ = os.environ.get("SX_VIZ_URL", "http://wh3:8051")
+# TARS light-curve viewer (tar-viz); same star set as sx-viz (table 2).
+DEFAULT_TARVIZ = os.environ.get("SX_TARVIZ_URL",
+                                "http://lcviz.lgbouma.com:8056")
 
 SUMMARY_COLUMNS = ["ticid", "med_snr", "n_used", "n_good", "n_masked",
                    "spline_ok", "resid_mad", "n_epochs", "ra", "dec"]
@@ -63,7 +71,9 @@ SED_COLUMNS = ["ticid", "teff_full", "chi2_full", "radius_ratio_full",
                "dbic_binary", "dbic_binary_pct", "dbic_disk", "dbic_disk_pct",
                "teff_bin2", "f_disk", "teff_disk"]
 TARS_EXTRA = ["TICID", "flag_possible_binary", "flag_multiple_periods",
-              "n_secs", "dr3_source_id"]
+              "n_secs", "dr3_source_id", "in_table2"]
+# Never downcast to float32 (identifiers).
+KEEP_DTYPE = ("ticid", "dr3_source_id", "dr2_source_id", "row")
 
 COLUMN_NOTES = {
     "teff_emp": "Teff mapped from the empirical sequence parameter",
@@ -110,7 +120,21 @@ COLUMN_NOTES = {
     "sed_red_excess_rel": "model-atmosphere red excess relative to the "
                           "Teff median (sx-viz)",
     "sequence_train": "1 if the star was used to build the sequence",
+    "in_table2": "1 if the star is a TARS table 2 rotator (Prot detected)",
+    "dist_pc": "1000 / parallax",
 }
+
+
+def _table_columns(path: Path) -> list[str]:
+    """Column names of a feather or parquet file without reading it."""
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+    import pyarrow.parquet as pq
+    path = Path(path)
+    if path.suffix == ".feather":
+        with pa.memory_map(str(path)) as src:
+            return list(ipc.open_file(src).schema.names)
+    return list(pq.read_schema(path).names)
 
 
 def _json_safe(value: Any) -> Any:
@@ -146,26 +170,36 @@ class Data:
         run_dir: Bulk run directory.
         viz_dir: Viz build (default ``<run>/viz``).
         ml_dir: ML products (default ``<run>/ml``).
-        tars_path: TARS table.
+        tars_path: TARS table (one row per star; table 2, or the table 4
+            star table from ``drivers/make_tars4_catalog.py``).
         sxviz_url: Base URL of the sx-viz app for star-page links.
+        name: Short dataset name used in ``?ds=``.
+        label: Dataset label shown on the page.
+        sxviz_rows: TIC ids that sx-viz serves (a dict or set); star-page
+            links are made only for those.  None: all stars.
     """
 
     def __init__(self, run_dir: Path, viz_dir: Optional[Path],
                  ml_dir: Optional[Path], tars_path: Path,
-                 sxviz_url: str = DEFAULT_SXVIZ) -> None:
+                 sxviz_url: str = DEFAULT_SXVIZ, name: str = "default",
+                 label: str = "", sxviz_rows: Optional[Any] = None) -> None:
         t0 = time.time()
         self.run_dir = Path(run_dir)
         self.viz_dir = Path(viz_dir) if viz_dir else self.run_dir / "viz"
         self.ml_dir = Path(ml_dir) if ml_dir else self.run_dir / "ml"
         self.sxviz_url = sxviz_url.rstrip("/")
+        self.name = name
+        self.label = label or name
+        self.sxviz_rows = sxviz_rows
         cat = specml.load_catalog(self.viz_dir, tars_path)
         n = len(cat)
         tic = cat["ticid"].to_numpy()
-        # Extra TARS columns.
+        # Extra TARS columns (those the table has).
+        extra = [c for c in TARS_EXTRA if c in _table_columns(tars_path)]
         if Path(tars_path).suffix == ".feather":
-            tars = pd.read_feather(tars_path, columns=TARS_EXTRA)
+            tars = pd.read_feather(tars_path, columns=extra)
         else:
-            tars = pd.read_parquet(tars_path, columns=TARS_EXTRA)
+            tars = pd.read_parquet(tars_path, columns=extra)
         tars = tars.rename(columns={"TICID": "ticid"}).drop_duplicates(
             "ticid").set_index("ticid").reindex(tic)
         for c in tars.columns:
@@ -209,13 +243,26 @@ class Data:
             self.train_rows = tr["row"].to_numpy()[order]
             self.train_t = tr["t"].to_numpy()[order]
         with np.errstate(all="ignore"):
-            cat["dms"] = specml.main_sequence_offset(
-                cat["bprp0"].to_numpy(dtype=float),
-                cat["mg0"].to_numpy(dtype=float))
+            bprp0 = cat["bprp0"].to_numpy(dtype=float)
+            mg0 = cat["mg0"].to_numpy(dtype=float)
+            # Running-median main sequence of this sample (for the CMD
+            # panel) and each star's offset from it.
+            self.ms_x, self.ms_y = specml.main_sequence_curve(bprp0, mg0)
+            dms = np.full(n, np.nan)
+            okc = np.isfinite(bprp0) & np.isfinite(mg0)
+            if len(self.ms_x):
+                dms[okc] = mg0[okc] - np.interp(bprp0[okc], self.ms_x,
+                                                self.ms_y)
+            cat["dms"] = dms
             cat["log_period"] = np.log10(cat["period"].to_numpy(dtype=float))
             cat["log_amplitude"] = np.log10(
                 cat["amplitude"].to_numpy(dtype=float))
             cat["dist_pc"] = 1000.0 / cat["plx"].to_numpy(dtype=float)
+        # float32 is enough for every served value and halves the memory
+        # of a multi-million-star table.
+        down = {c: np.float32 for c in cat.columns
+                if cat[c].dtype == np.float64 and c not in KEEP_DTYPE}
+        cat = cat.astype(down).copy()
         self.table = cat
         self.n = n
         self.ticid = tic
@@ -262,7 +309,11 @@ class Data:
             ok = np.isfinite(v)
             if not ok.any():
                 continue
-            lo, p1, p99, hi = np.percentile(v[ok], [0, 1, 99, 100])
+            vv = v[ok]
+            lo, hi = float(vv.min()), float(vv.max())
+            if len(vv) > 2_000_000:   # percentiles from a subsample
+                vv = vv[::len(vv) // 1_000_000]
+            p1, p99 = np.percentile(vv, [1, 99])
             out.append({"name": name, "min": float(lo), "max": float(hi),
                         "p1": float(p1), "p99": float(p99),
                         "n": int(ok.sum()),
@@ -277,15 +328,19 @@ class Data:
                     raise KeyError(name)
                 s = self.table[name]
                 if str(s.dtype) == "boolean":
-                    arr = s.fillna(False).to_numpy(dtype=float)
+                    arr = s.fillna(False).to_numpy(dtype=np.float32)
+                elif s.dtype == np.float32:
+                    arr = s.to_numpy()
                 else:
-                    arr = s.to_numpy(dtype=float)
-                self._cols[name] = arr.astype(np.float32)
+                    arr = s.to_numpy(dtype=np.float32)
+                self._cols[name] = arr
             return self._cols[name]
 
     def meta(self) -> dict:
         return {
+            "name": self.name, "label": self.label,
             "n": self.n, "columns": self.columns,
+            "mainseq": {"x": _round(self.ms_x, 4), "y": _round(self.ms_y, 4)},
             "embeddings": [{"name": k,
                             "n": int(np.isfinite(v[:, 0]).sum())}
                            for k, v in self.embeddings.items()],
@@ -325,9 +380,16 @@ class Data:
             "n": nper.astype(int).tolist(),
             "embedding": {k: _round(v[row], 4)
                           for k, v in self.embeddings.items()},
-            "links": {"sxviz": f"{self.sxviz_url}/star.html?ticid="
-                               f"{int(self.ticid[row])}"},
+            "links": {},
         }
+        tic = int(self.ticid[row])
+        if self.sxviz_rows is None or tic in self.sxviz_rows:
+            if self.sxviz_url:
+                payload["links"]["sxviz"] = (f"{self.sxviz_url}/star.html"
+                                             f"?ticid={tic}")
+            if DEFAULT_TARVIZ:
+                payload["links"]["tarviz"] = (f"{DEFAULT_TARVIZ}/star.html"
+                                              f"?ticid={tic}")
         if self.has_fits and rec.get("t_single") is not None:
             curves = empfit.model_curves(self.em, rec)
             payload["curves"] = {k: (_round(v, 7) if k != "lam" else None)
@@ -512,11 +574,185 @@ class Data:
         return out
 
 
-class Handler(SimpleHTTPRequestHandler):
-    """Static files plus the JSON / binary API."""
+VIZ_FILES = ("binned_flux.npy", "binned_ticid.npy", "summary.parquet")
+ML_FILES = ("sequence.npz", "sequence_nodes.csv", "empfit.parquet",
+            "umap.json")
 
-    def __init__(self, *args, data: Data, **kwargs) -> None:
-        self.data = data
+
+def products_stamp(viz: Path, ml: Path) -> Optional[float]:
+    """Newest mtime of a complete product set, or None if incomplete.
+
+    Complete means the viz arrays, the sequence, the fits, ``umap.json``
+    and every embedding it lists (or any ``umap_*.npy`` when it lists
+    none) exist.
+    """
+    paths = [viz / f for f in VIZ_FILES] + [ml / f for f in ML_FILES]
+    if not all(p.exists() for p in paths):
+        return None
+    try:
+        emb = json.loads((ml / "umap.json").read_text()).get("embeddings")
+    except ValueError:
+        return None
+    files = ([ml / e.get("file", f"umap_{k}.npy") for k, e in emb.items()]
+             if emb else sorted(ml.glob("umap_*.npy")))
+    if not files or not all(f.exists() for f in files):
+        return None
+    return max(p.stat().st_mtime for p in paths + files)
+
+
+def _entry_dirs(e: dict) -> tuple[Path, Path, Path]:
+    run = Path(e["run_dir"])
+    viz = Path(e["viz_dir"]) if e.get("viz_dir") else run / "viz"
+    ml = Path(e["ml_dir"]) if e.get("ml_dir") else run / "ml"
+    return run, viz, ml
+
+
+class Datasets:
+    """The datasets a server holds, by name.
+
+    Built from a list of loaded :class:`Data` and / or a JSON config
+    (``datasets.json``: ``{"sxviz_dataset": name, "datasets": [{name,
+    label, run_dir, tars, viz_dir?, ml_dir?}, ...]}``).  The first
+    config entry (or the first item) is the default.  :meth:`refresh`
+    loads the config entries whose products exist, and reloads one whose
+    products changed, so a server started while a run is still being
+    processed picks the dataset up later (:meth:`watch`).
+    ``sxviz_dataset`` names the dataset whose stars sx-viz serves: the
+    other datasets link only the stars that one has.
+    """
+
+    def __init__(self, items: Optional[list[Data]] = None,
+                 config: Optional[dict] = None,
+                 sxviz_url: str = DEFAULT_SXVIZ) -> None:
+        items = list(items or [])
+        self.config = config or {"datasets": []}
+        self.sxviz_url = sxviz_url
+        self.items: dict[str, Data] = {d.name: d for d in items}
+        self.stamps: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._order = [e["name"] for e in self.config["datasets"]]
+        self._order += [d.name for d in items if d.name not in self._order]
+        if not self._order:
+            raise ValueError("no datasets")
+        self._link_sxviz()
+
+    @property
+    def default(self) -> Data:
+        for name in self._order:
+            if name in self.items:
+                return self.items[name]
+        raise KeyError("no dataset loaded yet")
+
+    def get(self, name: Optional[str]) -> Data:
+        if not name:
+            return self.default
+        if name not in self.items:
+            raise KeyError(f"dataset {name}")
+        return self.items[name]
+
+    def pending(self) -> list[str]:
+        """Config entries whose products are not loaded."""
+        return [n for n in self._order if n not in self.items]
+
+    def summary(self) -> list[dict]:
+        labels = {e["name"]: e.get("label", e["name"])
+                  for e in self.config["datasets"]}
+        out = []
+        for name in self._order:
+            d = self.items.get(name)
+            if d is not None:
+                out.append({"name": name, "label": d.label, "n": d.n,
+                            "run_dir": str(d.run_dir), "ready": True})
+            else:
+                out.append({"name": name, "label": labels.get(name, name),
+                            "n": 0, "run_dir": "", "ready": False})
+        return out
+
+    def _link_sxviz(self) -> None:
+        sx = self.config.get("sxviz_dataset")
+        if sx in self.items:
+            rows = self.items[sx].row_of
+            for d in self.items.values():
+                if d.name != sx:
+                    d.sxviz_rows = rows
+
+    def refresh(self, quiet: float = 600.0) -> list[str]:
+        """(Re)load config entries whose products are complete.
+
+        A product set is used once its newest file is at least ``quiet``
+        seconds old, so half-written outputs are not read.  Returns the
+        names loaded.
+        """
+        loaded = []
+        for e in self.config["datasets"]:
+            name = e["name"]
+            run, viz, ml = _entry_dirs(e)
+            stamp = products_stamp(viz, ml)
+            if stamp is None:
+                if name not in self.items:
+                    LOGGER.info("dataset %s: products not complete yet "
+                                "in %s", name, ml)
+                continue
+            if stamp == self.stamps.get(name) or time.time() - stamp < quiet:
+                continue
+            try:
+                d = Data(run, viz, ml, Path(e["tars"]),
+                         sxviz_url=e.get("sxviz_url", self.sxviz_url),
+                         name=name, label=e.get("label", name))
+            except Exception:  # noqa: BLE001 - keep serving the others
+                LOGGER.exception("dataset %s failed to load", name)
+                self.stamps[name] = stamp   # retry when the products change
+                continue
+            was_loaded = name in self.items
+            with self._lock:
+                items = dict(self.items)
+                items[name] = d
+                self.items = items
+                self.stamps[name] = stamp
+                self._link_sxviz()
+            loaded.append(name)
+            LOGGER.info("dataset %s %s: %d stars, embeddings %s", name,
+                        "reloaded" if was_loaded else "loaded", d.n,
+                        list(d.embeddings))
+        return loaded
+
+    def watch(self, interval: float = 300.0, quiet: float = 600.0
+              ) -> threading.Thread:
+        """Poll for new or rebuilt products in a daemon thread."""
+        def loop() -> None:
+            while True:
+                time.sleep(interval)
+                try:
+                    self.refresh(quiet)
+                except Exception:  # noqa: BLE001
+                    LOGGER.exception("dataset refresh failed")
+        th = threading.Thread(target=loop, daemon=True, name="datasets")
+        th.start()
+        return th
+
+
+def load_datasets(config: dict, sxviz_url: str = DEFAULT_SXVIZ) -> Datasets:
+    """Build the datasets of a JSON config (see :class:`Datasets`).
+
+    Entries whose products are missing are left pending (a warning is
+    logged); :meth:`Datasets.watch` picks them up later.
+    """
+    sets = Datasets([], config, sxviz_url)
+    sets.refresh(quiet=0.0)
+    for name in sets.pending():
+        LOGGER.warning("dataset %s not loaded (products missing)", name)
+    return sets
+
+
+class Handler(SimpleHTTPRequestHandler):
+    """Static files plus the JSON / binary API.
+
+    ``data`` is a :class:`Datasets` (or a single :class:`Data`); the
+    ``ds`` query parameter selects the dataset.
+    """
+
+    def __init__(self, *args, data: Any, **kwargs) -> None:
+        self.sets = data if isinstance(data, Datasets) else Datasets([data])
         super().__init__(*args, directory=str(APP_DIR), **kwargs)
 
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: D102
@@ -565,13 +801,17 @@ class Handler(SimpleHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
     def _api_get(self, path: str, params: dict[str, list[str]]) -> None:
-        d = self.data
         seg = path[len("/api/"):].strip("/").split("/")
         one = {k: v[0] for k, v in params.items()}
+        d = self.sets.get(one.get("ds"))
         if seg[0] == "ping":
             self._json({"ok": True, "time": time.time()})
         elif seg[0] == "meta":
-            self._json(d.meta())
+            m = d.meta()
+            m["datasets"] = self.sets.summary()
+            m["default"] = self.sets.default.name
+            m["pending"] = self.sets.pending()
+            self._json(m)
         elif seg[0] == "points":
             name = one.get("emb", next(iter(d.embeddings), ""))
             if name not in d.embeddings:
@@ -610,9 +850,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                                "selection too large")
         try:
+            d = self.sets.get(parse_qs(url.query).get("ds", [None])[0])
             body = json.loads(self.rfile.read(length) or b"{}")
             rows = np.asarray(body.get("rows", []), dtype=np.int64)
-            self._json(self.data.selection(rows))
+            self._json(d.selection(rows))
+        except KeyError as exc:
+            self._error(HTTPStatus.NOT_FOUND, f"not found: {exc}")
         except (ValueError, TypeError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -628,6 +871,9 @@ def main() -> None:
     p.add_argument("--ml-dir", type=Path, default=None)
     p.add_argument("--tars", type=Path,
                    default=Path("/ar0/local/TARS/tars_table_2.feather"))
+    p.add_argument("--datasets", type=Path, default=None,
+                   help="JSON config with several datasets (see "
+                        "datasets.json); overrides --run-dir")
     p.add_argument("--sxviz-url", default=DEFAULT_SXVIZ)
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8052)
@@ -635,10 +881,18 @@ def main() -> None:
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    data = Data(args.run_dir, args.viz_dir, args.ml_dir, args.tars,
-                args.sxviz_url)
+    if args.datasets:
+        sets = load_datasets(json.loads(args.datasets.read_text()),
+                             args.sxviz_url)
+        sets.watch(interval=300.0, quiet=600.0)
+    else:
+        sets = Datasets([Data(args.run_dir, args.viz_dir, args.ml_dir,
+                              args.tars, args.sxviz_url)])
+    LOGGER.info("datasets: %s (pending %s)",
+                [d["name"] for d in sets.summary() if d["ready"]],
+                sets.pending())
     server = ThreadingHTTPServer((args.host, args.port),
-                                 partial(Handler, data=data))
+                                 partial(Handler, data=sets))
     server.daemon_threads = True
     LOGGER.info("serving sx-ml on http://%s:%d/", args.host, args.port)
     try:
