@@ -267,7 +267,7 @@
       head.appendChild(th);
     });
     const vth = document.createElement("th");
-    vth.textContent = "verdict";
+    vth.textContent = "notes";
     head.appendChild(vth);
 
     const body = $("table-body");
@@ -282,8 +282,8 @@
       });
       const v = state.verdicts[String(row.ticid)];
       const td = document.createElement("td");
-      td.textContent = v ? v.verdict : "";
-      if (v) td.className = "verdict-" + v.verdict;
+      td.textContent = v && v.notes ? v.notes : "";
+      if (v && v.notes) { td.className = "has-notes"; td.title = v.notes; }
       tr.appendChild(td);
       tr.addEventListener("click", (e) => openStar(row.ticid, e.metaKey || e.ctrlKey));
       frag.appendChild(tr);

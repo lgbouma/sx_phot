@@ -1,4 +1,4 @@
-/* sx-viz star page: spectrum, SED model comparison, cutouts, TARS vetting, verdicts. */
+/* sx-viz star page: spectrum, SED model comparison, cutouts, TARS vetting, notes. */
 (function () {
   "use strict";
 
@@ -128,26 +128,25 @@
     location.href = `star.html?ticid=${state.nav.ids[k]}`;
   }
 
-  // ------------------------------------------------------------ verdicts
+  // --------------------------------------------------------------- notes
+  // Free-text notes per star, stored through the /api/verdicts record
+  // store (the verdict field itself is no longer used by the UI).
   let notesDirty = false;
-  function renderVerdict(v) {
-    document.querySelectorAll("[data-verdict]").forEach((b) => {
-      b.classList.toggle("active", !!v && b.dataset.verdict === v.verdict);
-    });
+  function renderNotes(v) {
     $("notes").value = v ? v.notes || "" : "";
     notesDirty = false;
-    $("verdict-status").textContent = v && v.updated_utc ? `saved ${v.updated_utc}` : "";
+    $("notes-status").textContent = v && v.notes && v.updated_utc ? `saved ${v.updated_utc}` : "";
   }
-  async function postVerdict(verdict, notes) {
+  async function postNotes(notes) {
     const headers = { "Content-Type": "application/json" };
     if (state.token) headers["X-SX-Token"] = state.token;
     try {
       const saved = await fetchJson("/api/verdicts", {
         method: "POST", headers,
-        body: JSON.stringify({ ticid: Number(ticid), verdict, notes }),
+        body: JSON.stringify({ ticid: Number(ticid), verdict: "", notes }),
       });
-      renderVerdict(saved.verdict || saved.notes ? saved : null);
-      $("verdict-status").textContent = `saved ${saved.updated_utc}`;
+      renderNotes(saved.notes ? saved : null);
+      $("notes-status").textContent = `saved ${saved.updated_utc}`;
       return true;
     } catch (e) {
       if (String(e.message).includes("token")) {
@@ -155,24 +154,16 @@
         if (t !== null) {
           state.token = t.trim();
           localStorage.setItem("sxviz.token", state.token);
-          return postVerdict(verdict, notes);
+          return postNotes(notes);
         }
       }
-      $("verdict-status").textContent = "error: " + e.message;
+      $("notes-status").textContent = "error: " + e.message;
       return false;
     }
   }
-  function currentVerdict() {
-    const b = document.querySelector("[data-verdict].active");
-    return b ? b.dataset.verdict : "";
-  }
-  async function setVerdict(v) {
-    const ok = await postVerdict(v, $("notes").value);
-    if (ok && v && $("auto-advance").checked) go(1);
-  }
   async function saveNotesIfDirty() {
     if (!notesDirty) return;
-    await postVerdict(currentVerdict(), $("notes").value);
+    await postNotes($("notes").value);
   }
 
   // --------------------------------------------------------------- plots
@@ -545,9 +536,7 @@
     on("prev-star", "click", () => go(-1));
     on("next-star", "click", () => go(1));
     on("random-star", "click", goRandom);
-    document.querySelectorAll("[data-verdict]").forEach((b) => b.addEventListener("click", () => setVerdict(b.dataset.verdict)));
-    on("clear-verdict", "click", () => postVerdict("", ""));
-    on("save-notes", "click", () => postVerdict(currentVerdict(), $("notes").value));
+    on("save-notes", "click", () => postNotes($("notes").value));
     on("notes", "input", () => { notesDirty = true; });
     ["show-masked", "show-clipped", "show-spline", "show-binned", "show-sed", "log-axes", "color-time"].forEach((id) => {
       on(id, "change", drawSpectrum);
@@ -562,11 +551,6 @@
       if (e.key === "j" || e.key === "ArrowRight") go(1);
       else if (e.key === "k" || e.key === "ArrowLeft") go(-1);
       else if (e.key === "r") goRandom();
-      else if (e.key === "1") setVerdict("binary");
-      else if (e.key === "2") setVerdict("single");
-      else if (e.key === "3") setVerdict("unsure");
-      else if (e.key === "4") setVerdict("junk");
-      else if (e.key === "0") postVerdict("", "");
       else if (e.key === "m") { $("show-masked").checked = !$("show-masked").checked; drawSpectrum(); }
       else if (e.key === "n") { e.preventDefault(); $("notes").focus(); }
       else if (e.key === "[") stepTarsVet(-1);
@@ -589,7 +573,7 @@
     kv($("tars-table"), TARS_ROWS, row, (k, v) => (k === "ruwe" && v > 1.4) || (k === "non_single_star" && v > 0) || (k === "flag_possible_binary" && v));
     kv($("summary-table"), SUMMARY_ROWS, row);
     links(row);
-    renderVerdict(state.star.verdict);
+    renderNotes(state.star.verdict);
     $("sed-json").href = `/api/sed/${ticid}`;
     if (!state.sed) {
       try { state.sed = await fetchJson(`/api/sed/${ticid}`); } catch (e) { /* no fit */ }

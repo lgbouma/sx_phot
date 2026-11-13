@@ -133,9 +133,7 @@ th.sorted { color: var(--accent); }
 td:first-child, th:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); }
 tbody tr:hover td { background: var(--accent-soft); }
 tbody tr { cursor: pointer; }
-td.verdict-binary { color: var(--warm); }
-td.verdict-single { color: var(--muted); }
-td.verdict-junk { color: var(--red); }
+td.has-notes { color: var(--warm); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 
 /* star page */
 .star-layout {
@@ -183,8 +181,6 @@ td.verdict-junk { color: var(--red); }
 .cutout .label { position: absolute; left: 4px; top: 3px; font-size: 0.7rem; color: #fff; text-shadow: 0 0 3px #000; }
 .cutout svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
 .cutout.selected { border-color: var(--accent); }
-.verdict-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-.verdict-buttons button { padding: 7px 4px; }
 textarea { width: 100%; min-height: 70px; resize: vertical; }
 .status { font-size: 0.78rem; color: var(--muted); min-height: 1.1em; }
 .sed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 0.8rem; align-items: center; }
