@@ -377,6 +377,23 @@ def star_products(
     return spectrum, summary, binned
 
 
+_CATALOG_CACHE: dict[tuple, pd.DataFrame] = {}
+
+
+def _run_catalog(run_dir: Path) -> pd.DataFrame:
+    """Return (cached) ra and dec of a run's catalog, indexed by star_idx.
+
+    A multi-million-star catalog is read once per worker process rather
+    than once per bucket.
+    """
+    path = Path(run_dir) / "catalog.parquet"
+    key = (str(path), os.path.getmtime(path))
+    if key not in _CATALOG_CACHE:
+        _CATALOG_CACHE.clear()
+        _CATALOG_CACHE[key] = pd.read_parquet(path, columns=["ra", "dec"])
+    return _CATALOG_CACHE[key]
+
+
 def build_bucket(
     run_dir: Path,
     bucket: int,
@@ -421,7 +438,7 @@ def build_bucket(
     idx = _run_index(run_dir)[["image_key", "path"]]
     # Only the path is needed by to_legacy_frame; keep the merge small.
     rows_all = rows_all.merge(idx, on="image_key", how="left")
-    cat = pd.read_parquet(run_dir / "catalog.parquet")
+    cat = _run_catalog(run_dir)
 
     specs, summaries, binned_rows = [], [], []
     row_group = 0
