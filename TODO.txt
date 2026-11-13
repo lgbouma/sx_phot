@@ -11,7 +11,8 @@ In flight
       i.e. ~4-5 days on 76 cores for the 3.6B tars4 rows.  Profile and
       vectorise the stamp rendering before any TARS-scale PSF run.
   [ ] local slim Gaia DR3 copy for PSF neighbour lists: being fetched
-      since 2026-11-10 into /ar0/GAIA/gaia_dr3_slim (unit sx-gaia-slim;
+      since 2026-11-10 21:31 into /ar0/GAIA/gaia_dr3_slim (unit
+      sx-gaia-slim; restarted after the source_id rounding fix;
       drivers/fetch_gaia_slim.py, Heidelberg ARI TAP, 10M rows per job
       in source_id order; part 0: 10M rows in 273 s, 389 MB, so ~14 h
       and ~70 GB for 1.81e9 sources; the ESA CDN is IPv6-only and unreachable from wh3).
@@ -20,16 +21,6 @@ In flight
       use 65k rows.  Still to do: a vectorised neighbour builder
       (targets sorted by HEALPix, one pass per part) to replace
       drivers/query_gaia_neighbours.py for TARS-scale lists.
-  [ ] The local L2 mirror holds 870,957 qr2 files (2025W17-2026W06,
-      l2b-v20..v23, VERSION 6.4-6.5.5, 62 TB) with the IRSA PSF header
-      error; psf_phot corrects it on read.  The in-place repair is
-      ready (sx_phot/psf_header_fix.py, drivers/fix_psf_headers.py;
-      patched copy byte-identical to IRSA's fixed S3 file; dry run of
-      2000 files at 17 ms each, so ~4 h with 4 workers) but has NOT
-      been run on the mirror: run it when no photometry job is reading
-      the mirror, under the systemd-run cap, then psf_phot's reader fix
-      becomes a no-op.  Files from 6.5.6 on (2026W07 onward) are
-      unaffected.
   [ ] PSF mode reads whole images, as the aperture path does; for
       sparse target lists, memory-mapped box reads would be faster.
   [ ] PSF mode on qr3 (fixed 2026-11-10, see DONE.txt): the EPSF is

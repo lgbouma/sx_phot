@@ -47,10 +47,16 @@ def _to_frame(table) -> pd.DataFrame:
     """Convert an astropy table to the slim frame with fixed dtypes."""
     out = {}
     for c in COLUMNS:
-        col = np.asarray(table[c])
-        if np.ma.isMaskedArray(table[c]):
-            col = np.where(table[c].mask, np.nan, col)
-        out[c] = col.astype(DTYPES[c])
+        col = np.ma.getdata(table[c])
+        mask = np.ma.getmaskarray(table[c])
+        if np.issubdtype(DTYPES[c], np.integer):
+            # Never route ids through float: source_id > 2**53 would be
+            # rounded.  Gaia ids are never null.
+            if mask.any():
+                raise ValueError(f"masked values in integer column {c}")
+            out[c] = np.asarray(col).astype(DTYPES[c])
+        else:
+            out[c] = np.where(mask, np.nan, col).astype(DTYPES[c])
     df = pd.DataFrame(out)
     return df.sort_values("source_id").reset_index(drop=True)
 

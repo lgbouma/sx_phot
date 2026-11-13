@@ -104,7 +104,7 @@ nightly image download to add new weeks).  See `scripts/README.txt`.
 
 ## Gaia DR3 slim copy
 
-`/ar0/GAIA/gaia_dr3_slim/` (fetch started 2026-11-10 09:00, ~14 h; check
+`/ar0/GAIA/gaia_dr3_slim/` (fetch restarted 2026-11-10 21:31, ~18 h; check
 `manifest.csv` and `fetch.log`): source_id, ra, dec, pmra, pmdec,
 phot_g_mean_mag for all 1.81e9 Gaia DR3 sources as parquet parts
 sorted by source_id (HEALPix order), built by
@@ -154,11 +154,11 @@ complete.  No SED fits (sx-viz) for tars4 yet.
   supplement clips them.
 - qr2 and qr3 use different calibrations; never mix them in one time
   series (the `qr` column separates them).
-- qr2 files on the mirror through 2026W06 (VERSION 6.4-6.5.5 without
-  `+psffix1`) have the IRSA PSF zone-header error (XCTR/YCTR swapped);
-  the data arrays are identical to IRSA's fixed copies.  `psf_phot`
-  corrects it on read; anything else reading the PSF extension must
-  too, until the headers are patched in place (TODO.txt).
+- The IRSA PSF zone-header error (XCTR/YCTR swapped in VERSION
+  6.4-6.5.5) was repaired in place on the mirror on 2026-11-11 (all
+  870,957 qr2 files through 2026W06 now carry `+psffix1`; a repaired
+  file is byte-identical to IRSA's fixed copy).  `psf_phot` still
+  checks VERSION, so unrepaired files from elsewhere are handled too.
 - Rows at x or y near 0 or 2039 are gross outliers (detector edge).
 - The old per-star pipeline (`sx_phot/circphot.py`, IRSA based) is
   1.4-5 stars/h; use it only for stars outside every bulk run, or

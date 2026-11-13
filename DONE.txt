@@ -1,5 +1,18 @@
 DONE (running history; see TODO.txt for the roadmap)
 
+2026-11-11  PSF zone-header repair run on the whole L2 mirror (unit
+  sx-psffix, 4 workers, 10:03 to 01:08; 870,957 qr2 files fixed, 0
+  errors; slowed from 100k to 16k files/h after a 64-worker bulk run
+  started at 16:48).  Spot checks: 300 random files carry +psffix1 and
+  re-run as "skipped"; one file byte-identical to IRSA's fixed copy.
+  Gaia slim copy: the first fetch stored source_id rounded through
+  float64 (_to_frame used np.where with NaN on every column; ids above
+  2**53 lost their low bits), which also crashed the cursor at part 17.
+  Fixed with a large-id test, verified against the TAP CSV output,
+  bad parts set aside, fetch restarted from scratch at 21:31.
+  GitHub Actions test workflow added (badge in README); tests needing
+  wh3 data skip off-host.
+
 2026-11-10  PR #1 (Gaia-forced PSF photometry, F. Perez Paolino) merged;
   follow-ups: (a) qr3 PSF fluxes were 6% above qr2 because the qr3
   EPSF, an effective PSF, was block-summed like the qr2 oversampled

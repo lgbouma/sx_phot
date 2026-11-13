@@ -128,3 +128,20 @@ def test_to_frame_masks_to_nan():
     assert df.source_id.dtype == np.int64 and df.pmra.dtype == np.float32
     assert np.isnan(df.pmra.iloc[1]) and np.isnan(df.pmdec.iloc[0])
     assert df.phot_g_mean_mag.iloc[0] == pytest.approx(16.0)
+
+
+def test_to_frame_keeps_large_ids_exact():
+    """Ids above 2**53 survive a masked table without float rounding."""
+    sid = [1470802067227420032, 6917528997577384320]
+    t = Table({
+        "source_id": MaskedColumn(sid, mask=[False, False], dtype=np.int64),
+        "ra": MaskedColumn([1.0, 2.0]), "dec": MaskedColumn([0.0, 0.5]),
+        "pmra": MaskedColumn([1.0, 2.0], mask=[True, False]),
+        "pmdec": MaskedColumn([1.0, 2.0]),
+        "phot_g_mean_mag": MaskedColumn([15.0, 16.0]),
+    })
+    df = gs._to_frame(t)
+    assert list(df.source_id) == sid
+    t["source_id"].mask[0] = True
+    with pytest.raises(ValueError):
+        gs._to_frame(t)
