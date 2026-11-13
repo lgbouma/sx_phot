@@ -307,14 +307,35 @@ def test_epsf_stamp_is_point_sampled():
     st = z.stamp(0, 0.0, 0.0)
     want = p[16 - 10:16 + 11:5, 16 - 10:16 + 11:5] * 25.0
     assert st.shape == (5, 5)
-    assert np.allclose(st, want, rtol=0, atol=1e-6 * want.max())
+    assert np.allclose(st / st.sum(), want / want.sum(), rtol=0,
+                       atol=1e-6)
     assert st.sum() == pytest.approx(z.psum(0), rel=2e-2)
     # a shift of +1 px moves the peak by one pixel
     st1 = z.stamp(0, 1.0, 0.0)
-    assert np.allclose(st1[:, 1:], st[:, :-1], atol=1e-6 * want.max())
+    assert np.allclose(st1[:, 1:] / st1[:, 1:].sum(),
+                       st[:, :-1] / st[:, :-1].sum(), atol=1e-6)
     # the cube path still block-sums (its stamp at zero offset is an
     # interpolation between half-sample shifts, hence the tolerance)
     zc = ZonePsf(_psf_hdul())
     pc = np.asarray(_psf_hdul()["PSF"].data[0], float)
     assert zc.stamp(0, 0.0, 0.0)[4, 4] == pytest.approx(
         pc[45:55, 45:55].sum(), rel=1e-2)
+
+
+def test_epsf_stamp_sum_independent_of_pixel_phase():
+    """EPSF-table stamps conserve flux at every sub-pixel offset."""
+    # a Gaussian of sigma 0.3 px is badly undersampled at pixel
+    # centres, so its point-sampled sum depends strongly on phase
+    hdul = _epsf_hdul(sigma_samples=1.5)
+    offs = [(0.0, 0.0), (0.5, 0.5), (0.3, -0.2), (-0.5, 0.1)]
+    raw = ZonePsf(hdul, renorm_table=False)
+    sums = [raw.stamp(0, fx, fy).sum() for fx, fy in offs]
+    assert np.ptp(sums) > 0.3 * np.mean(sums)
+    z = ZonePsf(hdul)
+    for fx, fy in offs:
+        st = z.stamp(0, fx, fy)
+        assert st.sum() == pytest.approx(z.stamp_sum(0), rel=1e-12)
+        r = raw.stamp(0, fx, fy)
+        assert np.allclose(st / st.sum(), r / r.sum(), atol=1e-12)
+    # the cube path is not rescaled
+    assert not ZonePsf(_psf_hdul()).renorm

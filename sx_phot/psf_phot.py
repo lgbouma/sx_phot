@@ -26,6 +26,14 @@ Model choices (validated on SPYGLASS VII-A and Cep-Her/CMaN stars):
   and interpolated with 4-point (cubic Lagrange) weights in the
   fractional shift, which matches a cubic-spline shift of the
   oversampled PSF to about 1e-4 of the stamp peak.
+* The pixel sum of the qr3 'EPSF' table stamps depends on the
+  sub-pixel position of the star (2.1% rms on detector 3), which an
+  effective PSF should not do, and aperture fluxes do not follow it
+  (slope -0.005, 2026-11-11).  EPSF stamps are therefore rescaled to
+  the mean stamp sum of their zone, so the model conserves flux at
+  every pixel phase.  The stamp is 5 x 5 px, so the true phase
+  dependence of the truncated sum (about 0.2-0.3% rms) is removed
+  as well.
 * Files from pipeline versions 6.4-6.5.5 without the '+psffix1'
   VERSION suffix describe the PSF cube zones with x and y swapped
   (IRSA notice of 2026-03-13, SPHEREx/docs/psfhdrerr.html; up to 5%
@@ -204,12 +212,15 @@ class ZonePsf:
         hdul: Open Level-2 HDUList.
         reach: Stamp half-size in px (reduced if the PSF array is
             smaller).
+        renorm_table: Rescale EPSF-table stamps to the mean stamp sum
+            of their zone (see the module docstring).
 
     Raises:
         KeyError: If the file has neither a PSF nor an EPSF extension.
     """
 
-    def __init__(self, hdul, reach: int = 4) -> None:
+    def __init__(self, hdul, reach: int = 4,
+                 renorm_table: bool = True) -> None:
         names = {h.name.upper() for h in hdul}
         if "PSF" in names:
             hp = hdul["PSF"].header
@@ -245,6 +256,8 @@ class ZonePsf:
         self.pad = o + 3
         self._padded: dict[int, np.ndarray] = {}
         self._psum: dict[int, float] = {}
+        self.renorm = bool(renorm_table) and self.kind == "table"
+        self._ssum: dict[int, float] = {}
         self._stamps: dict[tuple[int, int, int], np.ndarray] = {}
 
     def zone(self, x: float, y: float) -> int:
@@ -262,6 +275,19 @@ class ZonePsf:
         """Return the sum of the oversampled PSF of a zone."""
         self._load(zone)
         return self._psum[zone]
+
+    def stamp_sum(self, zone: int) -> float:
+        """Return the stamp sum of a zone averaged over pixel phase.
+
+        The average runs over the o x o integer sample shifts, which
+        tile one pixel.
+        """
+        if zone not in self._ssum:
+            o = self.o
+            self._ssum[zone] = float(np.mean(
+                [self._int_stamp(zone, sy, sx).sum()
+                 for sy in range(o) for sx in range(o)]))
+        return self._ssum[zone]
 
     def _int_stamp(self, zone: int, sy: int, sx: int) -> np.ndarray:
         """Pixel stamp for an integer shift (sy, sx) in samples.
@@ -311,6 +337,10 @@ class ZonePsf:
                 row = row + wx[j] * self._int_stamp(zone, y0 + i - 1,
                                                     x0 + j - 1)
             out = out + wy[i] * row
+        if self.renorm:
+            tot = float(out.sum())
+            if tot > 0:
+                out = out * (self.stamp_sum(zone) / tot)
         return out
 
     def render(self, zone: int, xl: float, yl: float, h: int,
