@@ -161,3 +161,35 @@ def test_skip_failed_bands_keeps_other_bands():
     with pytest.raises(ValueError):
         fit_spherex_spectrum_bspline(lam[:2], lam[:2] / 40, flux[:2],
                                      err[:2], skip_failed_bands=True)
+
+
+def test_fit_band_many_repeated_wavelengths() -> None:
+    """Deep-field stars have ~1e4 rows with repeated wavelengths.
+
+    The duplicate jitter used to push the last points past the end knot
+    and raise "Out of bounds" in make_lsq_spline.
+    """
+    band = spherex_band_definitions()[3]
+    rng = np.random.default_rng(7)
+    n_points = 8000
+    grid = np.linspace(band["assign_min_um"], band["assign_max_um"], 400)
+    wavelength = rng.choice(grid, n_points)
+    wavelength[:2] = grid[[0, -1]]
+    bandwidth = np.full(n_points, 0.03)
+    flux = 1.0 + 0.01 * rng.standard_normal(n_points)
+    flux_err = np.full(n_points, 0.01)
+
+    res = fit_band_bspline(
+        wavelength_um=wavelength,
+        bandwidth_um=bandwidth,
+        flux_jy=flux,
+        flux_err_jy=flux_err,
+        input_mask=np.ones(n_points, dtype=bool),
+        band_name=str(band["name"]),
+        band_min_um=float(band["band_min_um"]),
+        band_max_um=float(band["band_max_um"]),
+        assign_min_um=float(band["assign_min_um"]),
+        assign_max_um=float(band["assign_max_um"]),
+    )
+
+    assert np.all(np.isfinite(res.model_flux_jy))

@@ -323,6 +323,15 @@ def fit_band_bspline(
         yg = y[good]
         wg = 1.0 / yerr[good]
 
+        # If xg contains repeated values, make_lsq_spline can fail.
+        # We lightly jitter repeated wavelengths within machine precision.
+        # The jitter grows with index, so the knot boundaries must be taken
+        # from the jittered values: with ~1e4 points (deep-field stars) the
+        # last points otherwise land past the end knot ("Out of bounds").
+        if np.any(np.diff(xg) == 0):
+            eps = np.finfo(float).eps
+            xg = xg + eps * np.arange(xg.size)
+
         x_min_it = float(np.min(xg))
         x_max_it = float(np.max(xg))
         interior = _interior_knots(x_min_it, x_max_it, spacing, spacing_mode)
@@ -335,12 +344,6 @@ def fit_band_bspline(
                 np.full(degree + 1, x_max_it),
             ]
         )
-
-        # If xg contains repeated values, make_lsq_spline can fail.
-        # We lightly jitter repeated wavelengths within machine precision.
-        if np.any(np.diff(xg) == 0):
-            eps = np.finfo(float).eps
-            xg = xg + eps * np.arange(xg.size)
 
         spline = make_lsq_spline(xg, yg, t, degree, w=wg)
         knot_vec = t

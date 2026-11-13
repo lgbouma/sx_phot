@@ -428,7 +428,7 @@ def materialize_star(
     base.to_csv(paths["cache"], index=False)
     if supplement and len(base) >= 4:
         try:
-            supp = supplement_with_spline(base)
+            supp = supplement_with_spline(base, skip_failed_bands=True)
         except ValueError as exc:
             log.warning("TIC %d: spline supplement skipped (%s)", ticid, exc)
         else:
